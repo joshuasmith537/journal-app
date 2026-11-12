@@ -57,9 +57,8 @@ export interface BatchUpdateBody {
 
 export const TEXT_FIELDS =
   "bold,italic,underline,strikethrough,fontSize,foregroundColor,backgroundColor,weightedFontFamily";
-/** Clears every inline text field this app sets, so the named paragraph style shows through. */
-export const RESET_TEXT_FIELDS =
-  "fontFamily,weightedFontFamily,fontSize,foregroundColor,backgroundColor,bold,italic,underline,strikethrough,link";
+/** Unsets every TextStyle field. `fontFamily` is not one of them; `*` is. */
+export const RESET_TEXT_FIELDS = "*";
 const SPACED_PARA_FIELDS = "namedStyleType,lineSpacing,spaceAbove,spaceBelow";
 const TITLE_PARA_FIELDS = "namedStyleType,lineSpacing,spaceAbove,spaceBelow";
 const ENTRY_LINE_SPACING = 100;

@@ -231,6 +231,44 @@ export function stripDocsControls(value: string): string {
   return value.replace(/[\u0000-\u0008\u000C-\u001F\uE000-\uF8FF]/g, "");
 }
 
+export function entryFromDraft(
+  draft: {
+    title: string;
+    body: string;
+    mood: Mood | null;
+    moodWords: string;
+    place: string;
+    moodTags: string;
+    topicTags: string;
+    weather: string | null;
+  },
+  at = new Date(),
+): JournalEntry | null {
+  const title = stripDocsControls(draft.title).trim();
+  if (!title || !draft.mood) return null;
+  const tags = (value: string) =>
+    stripDocsControls(value)
+      .split(/[\s,]+/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+  return {
+    at,
+    title,
+    mood: draft.mood,
+    moodWords: stripDocsControls(draft.moodWords)
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(", "),
+    place: stripDocsControls(draft.place).trim() || "Chicago, IL",
+    weather: draft.weather == null ? null : stripDocsControls(draft.weather),
+    body: stripDocsControls(draft.body).replace(/\n+$/, ""),
+    moodTags: tags(draft.moodTags),
+    topicTags: tags(draft.topicTags),
+    status: "Published",
+  };
+}
+
 export function entryLines(entry: JournalEntry): MarkedLine[] {
   const title = stripDocsControls(entry.title);
   const moodWords = stripDocsControls(entry.moodWords).trim();

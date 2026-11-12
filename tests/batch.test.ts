@@ -3,6 +3,7 @@ import { buildAppendRequests, buildCreateRequests, buildWriteRequests, type Text
 import { structureFromPlainText } from "../src/journal/structure";
 import { DIVIDER, KICKER, renderDocument } from "../src/journal/text";
 import { applyDoc, paragraphRangesStayInside } from "./applyDoc";
+import { invalidFieldPaths } from "./docsFields";
 import { entryOne, entryTwo } from "./fixtures";
 
 function hex(style: Partial<TextStyle> | undefined): string {
@@ -78,8 +79,7 @@ describe("entry batchUpdate builder", () => {
     expect(titleStyle?.updateParagraphStyle?.paragraphStyle.spaceBelow).toBeUndefined();
     const titleTextReset = body.requests.find((request) => request.updateTextStyle?.range.startIndex === titleStart);
     expect(titleTextReset?.updateTextStyle?.textStyle).toEqual({});
-    expect(titleTextReset?.updateTextStyle?.fields).toContain("weightedFontFamily");
-    expect(titleTextReset?.updateTextStyle?.fields).toContain("link");
+    expect(titleTextReset?.updateTextStyle?.fields).toBe("*");
 
     const mood = byText.get("Mood: calm, focused");
     expect(mood?.textStyle?.weightedFontFamily?.fontFamily).toBe("Arial");
@@ -157,6 +157,30 @@ describe("entry batchUpdate builder", () => {
     expect(between[1]?.para?.lineSpacing).toBe(100);
     expect(between[1]?.textStyle?.fontSize).toEqual({ magnitude: 11, unit: "PT" });
     expect(hex(between[1]?.textStyle)).toBe("#DADCE0");
+  });
+
+  it("sends only field masks the Docs API discovery document defines", () => {
+    const bodies = [
+      buildCreateRequests(entryOne, "rev"),
+      buildAppendRequests(structureFromPlainText(renderDocument([entryOne])), "rev", entryTwo),
+    ];
+    const kinds = ["updateTextStyle", "updateParagraphStyle", "updateNamedStyle", "updateDocumentStyle"];
+    const seen = new Set<string>();
+    for (const body of bodies) {
+      for (const request of body.requests) {
+        const record = request as Record<string, { fields?: string } | undefined>;
+        for (const kind of kinds) {
+          const fields = record[kind]?.fields;
+          if (!fields) continue;
+          seen.add(`${kind}:${fields}`);
+          expect(invalidFieldPaths(kind, fields)).toEqual([]);
+        }
+      }
+    }
+    expect(seen.has("updateTextStyle:*")).toBe(true);
+    expect(seen.has("updateParagraphStyle:namedStyleType,lineSpacing,spaceAbove,spaceBelow")).toBe(true);
+    expect(seen.has("updateNamedStyle:namedStyleType,textStyle,paragraphStyle")).toBe(true);
+    expect(invalidFieldPaths("updateTextStyle", "fontFamily")).toEqual(["fontFamily"]);
   });
 
   it("refuses to write a document that has no banner", () => {

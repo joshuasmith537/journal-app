@@ -6,7 +6,8 @@ import { defineConfig, type Plugin } from "vitest/config";
 
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-eval' https://accounts.google.com https://apis.google.com https://*.gstatic.com",
+  // The Picker bundle parses its config with eval and new Function.
+  "script-src 'self' 'unsafe-eval' https://accounts.google.com https://apis.google.com https://www.gstatic.com",
   "style-src 'self' 'unsafe-inline' https://accounts.google.com https://*.gstatic.com",
   "img-src 'self' data: https://*.gstatic.com https://*.googleusercontent.com",
   "font-src 'self' https://*.gstatic.com",

@@ -5,12 +5,13 @@ import { currentToken, initAuth, loadGoogle, openJournalPicker, pickerParent, re
 import { GoogleDrive } from "./google/client";
 import { cacheWarning, parseJournal } from "./journal/parse";
 import { filterDriveFiles } from "./journal/accountability";
-import { DOC_MIME, type DriveFile, monthCreateMessage, nextCreateStep, publishEntry } from "./journal/sync";
+import { DOC_MIME, type DriveFile, monthCreateMessage, nextCreateStep, publishEntry, yearPickerWasOpened } from "./journal/sync";
 import {
   MOODS,
   type JournalEntry,
   type Mood,
   docTitle,
+  entryFromDraft,
   entryIdentity,
   formatDateLine,
   formatHashtags,
@@ -173,7 +174,7 @@ async function boot(): Promise<void> {
 }
 
 function onPublish(): void {
-  if (!entryFromDraft()) {
+  if (!entryFromDraft(state.draft)) {
     state.note = "Add a title and choose a mood.";
     setNote();
     return;
@@ -192,7 +193,7 @@ async function publishCurrentDraft(): Promise<void> {
   }
   const fresh = navigator.onLine ? await lookupWeather(state.draft.place || "Chicago, IL", 5000) : null;
   state.draft.weather = chooseWeather(navigator.onLine, fresh, cached);
-  const entry = entryFromDraft();
+  const entry = entryFromDraft(state.draft);
   if (!entry) return;
   await finishPublish(entry);
 }
@@ -355,7 +356,7 @@ async function chooseFiles(): Promise<void> {
   );
   await remember(picked);
   state.confirm = null;
-  keepChain(() => flush({ yearPickerOpened: createParent?.parentName !== "Personal", personalPickerOpened: true }));
+  keepChain(() => flush({ yearPickerOpened: yearPickerWasOpened(createParent), personalPickerOpened: true }));
 }
 
 async function remember(files: DriveFile[]): Promise<void> {
@@ -606,23 +607,6 @@ function toCached(docId: string, index: number, entry: JournalEntry): CachedEntr
 
 function queuedToEntry(item: QueuedEntry): JournalEntry {
   return { ...item, at: new Date(item.at), status: "Published" };
-}
-
-function entryFromDraft(): JournalEntry | null {
-  const title = state.draft.title.trim();
-  if (!title || !state.draft.mood) return null;
-  return {
-    at: new Date(),
-    title,
-    mood: state.draft.mood,
-    moodWords: state.draft.moodWords.split(",").map((part) => part.trim()).filter(Boolean).join(", "),
-    place: state.draft.place.trim() || "Chicago, IL",
-    weather: state.draft.weather,
-    body: state.draft.body.replace(/\n+$/, ""),
-    moodTags: splitTags(state.draft.moodTags),
-    topicTags: splitTags(state.draft.topicTags),
-    status: "Published",
-  };
 }
 
 function splitTags(value: string): string[] {

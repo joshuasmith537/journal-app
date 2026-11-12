@@ -12,9 +12,10 @@ import {
   monthCreateMessage,
   nextCreateStep,
   publishEntry,
+  yearPickerWasOpened,
   type DriveIO,
 } from "../src/journal/sync";
-import { formatHashtags, renderBanner, renderDocument, stripDocsControls, type JournalEntry } from "../src/journal/text";
+import { entryFromDraft, formatHashtags, renderBanner, renderDocument, stripDocsControls, type JournalEntry } from "../src/journal/text";
 import { chooseWeather } from "../src/weather";
 import { placeCspMeta } from "../src/cspMeta";
 import { applyDoc, paragraphRangesStayInside } from "./applyDoc";
@@ -189,6 +190,9 @@ describe("new month creation", () => {
     expect(nextCreateStep("Personal", { year: false, personal: true })).toBe("confirm-year");
     expect(nextCreateStep("2027", { year: false, personal: true })).toBe("open-picker");
     expect(nextCreateStep("2027", { year: true, personal: true })).toBe("confirm-month");
+    expect(yearPickerWasOpened(null)).toBe(false);
+    expect(yearPickerWasOpened({ parentName: "Personal" })).toBe(false);
+    expect(yearPickerWasOpened({ parentName: "2026" })).toBe(true);
     expect(monthCreateMessage(yearOnly.monthFolder, yearOnly.docTitle)).toBe(
       "If you see “01 - January” or “Personal Journal \u2013 January 2027”, choose that. Create only if neither exists.",
     );
@@ -289,10 +293,17 @@ describe("smaller review fixes", () => {
     expect(DRIVE_SCOPE).toBe("https://www.googleapis.com/auth/drive.file");
   });
 
-  it("places the CSP meta before scripts and styles", () => {
-    const html = placeCspMeta('<head>\n    <script src="/app.js"></script>\n    <link rel="stylesheet" href="/app.css">\n  </head>', "default-src 'self'");
+  it("places charset first and the CSP meta immediately after it", () => {
+    const html = placeCspMeta(
+      '<head>\n    <meta name="viewport" content="width=device-width" />\n    <meta charset="UTF-8" />\n    <script src="/app.js"></script>\n    <link rel="stylesheet" href="/app.css">\n  </head>',
+      "default-src 'self'",
+    );
+    const head = html.indexOf("<head>");
+    expect(html.indexOf("<meta charset", head)).toBeLessThan(html.indexOf("Content-Security-Policy"));
+    expect(html.indexOf("Content-Security-Policy")).toBeLessThan(html.indexOf("viewport"));
     expect(html.indexOf("Content-Security-Policy")).toBeLessThan(html.indexOf("<script"));
     expect(html.indexOf("Content-Security-Policy")).toBeLessThan(html.indexOf("stylesheet"));
+    expect(html.indexOf('charset="UTF-8"')).toBe(html.lastIndexOf('charset="UTF-8"'));
   });
 
   it("restricts pages deployment permissions to the deploy job", () => {
@@ -314,6 +325,26 @@ describe("smaller review fixes", () => {
 
   it("strips control characters Docs would drop and keeps tabs and newlines", () => {
     expect(stripDocsControls("a\nb\tc\u0000\u0007\u000C\uE000")).toBe("a\nb\tc");
+  });
+
+  it("stores a title without control characters so the written entry matches the duplicate check", () => {
+    const entry = entryFromDraft(
+      {
+        title: "Placeholder\u0000 Title",
+        body: "Line\u0007",
+        mood: "😐",
+        moodWords: "calm",
+        place: "Chicago, IL",
+        moodTags: "",
+        topicTags: "",
+        weather: null,
+      },
+      entryOne.at,
+    );
+    expect(entry?.title).toBe("Placeholder Title");
+    const text = renderDocument([entry!]);
+    expect(text).not.toContain("\u0000");
+    expect(entryAlreadyInDocument(text, entry!)).toBe(true);
   });
 
   it("uses fresh weather when online and the previous value when not", () => {

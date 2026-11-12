@@ -206,6 +206,11 @@ export function monthCreateMessage(monthFolder: string, docTitle: string): strin
   return `If you see “${monthFolder}” or “${docTitle}”, choose that. Create only if neither exists.`;
 }
 
+/** The year-folder picker ran only when a create confirm named a parent other than Personal. */
+export function yearPickerWasOpened(parent: { parentName: string } | null): boolean {
+  return parent !== null && parent.parentName !== "Personal";
+}
+
 function grant(target: "personal" | "year" | "month" | "doc", id: string, label: string): EnsureResult {
   return { ok: false, code: "grant", target, id, label };
 }

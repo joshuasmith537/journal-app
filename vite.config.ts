@@ -43,9 +43,15 @@ function productionExtras(): Plugin {
       walk(dist);
       const precache = ["./", ...files.filter((file) => file !== "sw.js").map((file) => `./${file}`)];
       const swPath = path.join(dist, "sw.js");
-      const hash = createHash("sha256").update(precache.join("|")).digest("hex").slice(0, 8);
+      const hash = createHash("sha256");
+      hash.update(precache.join("|"));
+      for (const file of files) {
+        if (file === "sw.js") continue;
+        hash.update(readFileSync(path.join(dist, file)));
+      }
+      const id = hash.digest("hex").slice(0, 8);
       const sw = readFileSync(swPath, "utf8")
-        .replace('const CACHE = "journal-shell";', `const CACHE = "journal-shell-${hash}";`)
+        .replace('const CACHE = "journal-shell";', `const CACHE = "journal-shell-${id}";`)
         .replace("const PRECACHE = [];", `const PRECACHE = ${JSON.stringify(precache)};`);
       writeFileSync(swPath, sw);
     },

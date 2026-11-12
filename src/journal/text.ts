@@ -287,7 +287,10 @@ export function entryLines(entry: JournalEntry): MarkedLine[] {
     }
   }
   const tags = formatHashtags(entry.moodTags.map(stripDocsControls), entry.topicTags.map(stripDocsControls));
-  if (tags) lines.push({ kind: "tags", text: tags });
+  if (tags) {
+    if (body.length) lines.push({ kind: "blank", text: "" });
+    lines.push({ kind: "tags", text: tags });
+  }
   lines.push({ kind: "status", text: `Journal: ${monthLabel(entry.at)}${NARROW}${entry.status}` });
   lines.push({ kind: "source", text: SOURCE_LINE });
   return lines;

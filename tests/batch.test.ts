@@ -102,6 +102,23 @@ describe("entry batchUpdate builder", () => {
     expect(hex(bodyLine?.textStyle)).toBe("#000000");
     expect(bodyLine?.para?.lineSpacing).toBe(100);
 
+    const texts = applied.paragraphs.map((paragraph) => paragraph.text);
+    const lastBody = texts.lastIndexOf("Second placeholder paragraph.");
+    const tagIndex = texts.indexOf("#calm #focused  \u00b7  #placeholder");
+    expect(texts[lastBody + 1]).toBe("");
+    expect(tagIndex).toBe(lastBody + 2);
+    const beforeTags = applied.paragraphs[lastBody + 1];
+    expect(beforeTags?.textStyle?.fontSize).toEqual({ magnitude: 11, unit: "PT" });
+    expect(beforeTags?.textStyle?.weightedFontFamily).toEqual({ fontFamily: "Arial", weight: 400 });
+    expect(hex(beforeTags?.textStyle)).toBe("#000000");
+    expect(beforeTags?.para?.lineSpacing).toBe(100);
+    expect(beforeTags?.para?.spaceAbove).toEqual({ magnitude: 0, unit: "PT" });
+    expect(beforeTags?.para?.spaceBelow).toEqual({ magnitude: 0, unit: "PT" });
+    const inserted = body.requests.find((request) => request.insertText)?.insertText?.text.split("\n") ?? [];
+    const insertedBody = inserted.lastIndexOf("Second placeholder paragraph.");
+    expect(inserted[insertedBody + 1]).toBe("");
+    expect(inserted[insertedBody + 2]).toBe("#calm #focused  \u00b7  #placeholder");
+
     const tags = byText.get("#calm #focused  \u00b7  #placeholder");
     expect(tags?.textStyle?.weightedFontFamily?.fontFamily).toBe("Arial");
     expect(tags?.textStyle?.italic).toBe(true);

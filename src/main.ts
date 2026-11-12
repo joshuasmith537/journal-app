@@ -19,6 +19,14 @@ import {
   stripDocsControls,
 } from "./journal/text";
 import { chooseWeather, lookupWeather } from "./weather";
+import {
+  DEFAULT_PLACE,
+  locateAction,
+  placeAfterLocate,
+  readCurrentPosition,
+  readGeoPermission,
+  reverseStreetAddress,
+} from "./location";
 
 interface Draft {
   title: string;
@@ -120,6 +128,8 @@ let noteNode: HTMLElement | null = null;
 let saveTimer = 0;
 let weatherTimer = 0;
 let weatherGeneration = 0;
+let locating = false;
+let placeHint = "";
 
 void boot();
 
@@ -213,6 +223,7 @@ async function finishPublish(entry: JournalEntry): Promise<void> {
   };
   state.queue.push(item);
   state.draft = emptyDraft();
+  placeHint = "";
   await kvSet("queue", state.queue);
   await kvSet("draft", state.draft);
   if (!navigator.onLine) state.note = "Saved on this device. It will sync when you are online and signed in.";
@@ -449,7 +460,11 @@ function bindRoute(): void {
   });
   bind("place", (value) => {
     state.draft.place = value;
+    placeHint = "";
   }, true);
+  document.querySelector("#locate")?.addEventListener("click", () => {
+    void locateFromButton();
+  });
   bind("mood-tags", (value) => {
     state.draft.moodTags = value;
   });
@@ -468,7 +483,21 @@ function writeView(): HTMLElement {
   const draft = state.draft;
   return h("section", { class: "write" },
     h("p", { class: "dateline" }, formatDateLine(new Date())),
-    h("label", { class: "field" }, h("span", null, "Place"), h("input", { id: "place", value: draft.place, autocomplete: "off" })),
+    h("div", { class: "field" },
+      h("span", null, "Place"),
+      h("div", { class: "place-line" },
+        h("input", { id: "place", value: draft.place, autocomplete: "off" }),
+        h("button", {
+          type: "button",
+          id: "locate",
+          class: locating ? "locate busy" : "locate",
+          "aria-label": "Use current location",
+          "aria-busy": locating ? "true" : "false",
+          ...(locating ? { disabled: "true" } : {}),
+        }, locating ? "" : "\u{1F4CD}"),
+      ),
+      h("p", { class: "fine place-hint", id: "place-hint" }, placeHint),
+    ),
     h("p", { class: "weather" }, draft.weather ?? (navigator.onLine ? "Loading weather…" : "Weather unavailable")),
     h("label", { class: "field" }, h("span", null, "Title"), h("input", { id: "title", class: "title-input", value: draft.title, autocomplete: "off" })),
     h("div", { class: "moods", role: "radiogroup", "aria-label": "Mood" }, ...MOODS.map((mood) => moodButton(mood, draft.mood === mood))),
@@ -667,13 +696,52 @@ function draftEmpty(draft: Draft): boolean {
   return !draft.title.trim() && !draft.body.trim() && !draft.mood && !draft.moodWords.trim() && !draft.moodTags.trim() && !draft.topicTags.trim();
 }
 
+async function locateFromButton(): Promise<void> {
+  if (locating) return;
+  locating = true;
+  placeHint = "";
+  paintLocateButton();
+  try {
+    const action = locateAction(await readGeoPermission(), config.GOOGLE_MAPS_API_KEY);
+    const position = action === "position" ? await readCurrentPosition() : null;
+    const address = position
+      ? await reverseStreetAddress(position.latitude, position.longitude, config.GOOGLE_MAPS_API_KEY)
+      : null;
+    const next = placeAfterLocate(state.draft.place, address);
+    placeHint = next.hint;
+    if (next.place !== state.draft.place) {
+      state.draft.place = next.place;
+      state.draft.updatedAt = new Date().toISOString();
+      const input = document.querySelector<HTMLInputElement>("#place");
+      if (input) input.value = next.place;
+      scheduleSave();
+      scheduleWeather();
+    }
+  } finally {
+    locating = false;
+    paintLocateButton();
+  }
+}
+
+function paintLocateButton(): void {
+  const button = document.querySelector<HTMLButtonElement>("#locate");
+  if (button) {
+    button.classList.toggle("busy", locating);
+    button.disabled = locating;
+    button.setAttribute("aria-busy", locating ? "true" : "false");
+    button.textContent = locating ? "" : "\u{1F4CD}";
+  }
+  const hint = document.querySelector("#place-hint");
+  if (hint) hint.textContent = placeHint;
+}
+
 function emptyDraft(): Draft {
   return {
     title: "",
     body: "",
     mood: null,
     moodWords: "",
-    place: "Chicago, IL",
+    place: DEFAULT_PLACE,
     moodTags: "",
     topicTags: "",
     weather: null,

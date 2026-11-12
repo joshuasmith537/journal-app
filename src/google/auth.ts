@@ -67,6 +67,11 @@ export function initAuth(): void {
         emit(null, response.error || "Sign-in failed");
         return;
       }
+      if (!scopeWasGranted(google.accounts.oauth2.hasGrantedAllScopes, response, DRIVE_SCOPE)) {
+        token = null;
+        emit(null, "Google did not grant access to the files you use with this app. Sign in again and allow it.");
+        return;
+      }
       const expiresIn = response.expires_in ?? 3600;
       token = { value: response.access_token, expiresAt: Date.now() + expiresIn * 1000 - 60_000 };
       if (typeof localStorage !== "undefined") localStorage.setItem(GRANTED_KEY, "1");
@@ -83,6 +88,15 @@ const GRANTED_KEY = "journal-drive-granted";
 /** Consent on the first grant only. Later sessions reuse the stored grant silently. */
 export function authPrompt(previouslyGranted: boolean): "" | "consent" {
   return previouslyGranted ? "" : "consent";
+}
+
+export function scopeWasGranted(
+  hasAll: ((token: TokenResponse, scope: string) => boolean) | undefined,
+  tokenResponse: TokenResponse,
+  scope: string,
+): boolean {
+  if (!hasAll) return true;
+  return hasAll(tokenResponse, scope);
 }
 
 export function requestToken(): void {
@@ -165,6 +179,7 @@ declare global {
             callback: (response: TokenResponse) => void;
             error_callback?: () => void;
           }) => TokenClient;
+          hasGrantedAllScopes?: (tokenResponse: TokenResponse, scope: string) => boolean;
         };
       };
       picker: {

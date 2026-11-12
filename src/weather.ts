@@ -7,10 +7,10 @@ export function chooseWeather(online: boolean, fresh: string | null, cached: str
   return cached;
 }
 
-export async function lookupWeather(place: string): Promise<string | null> {
+export async function lookupWeather(place: string, timeoutMs = 8000): Promise<string | null> {
   try {
-    const coords =
-      place.trim().toLowerCase() === "chicago, il" ? CHICAGO : await geocode(place.trim());
+    const signal = AbortSignal.timeout(timeoutMs);
+    const coords = place.trim().toLowerCase() === "chicago, il" ? CHICAGO : await geocode(place.trim(), signal);
     if (!coords) return null;
     const url = new URL("https://api.open-meteo.com/v1/forecast");
     url.searchParams.set("latitude", String(coords.latitude));
@@ -18,7 +18,7 @@ export async function lookupWeather(place: string): Promise<string | null> {
     url.searchParams.set("current", "temperature_2m,weather_code");
     url.searchParams.set("temperature_unit", "fahrenheit");
     url.searchParams.set("timezone", "America/Chicago");
-    const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(8000) });
+    const response = await fetch(url, { cache: "no-store", signal });
     if (!response.ok) return null;
     const data = (await response.json()) as { current?: { temperature_2m?: number; weather_code?: number } };
     const temp = data.current?.temperature_2m;
@@ -30,13 +30,13 @@ export async function lookupWeather(place: string): Promise<string | null> {
   }
 }
 
-async function geocode(name: string): Promise<{ latitude: number; longitude: number } | null> {
+async function geocode(name: string, signal: AbortSignal): Promise<{ latitude: number; longitude: number } | null> {
   if (!name) return null;
   const url = new URL("https://geocoding-api.open-meteo.com/v1/search");
   url.searchParams.set("name", name);
   url.searchParams.set("count", "1");
   url.searchParams.set("language", "en");
-  const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(8000) });
+  const response = await fetch(url, { cache: "no-store", signal });
   if (!response.ok) return null;
   const data = (await response.json()) as { results?: Array<{ latitude?: number; longitude?: number }> };
   const hit = data.results?.[0];

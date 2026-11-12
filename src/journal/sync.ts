@@ -38,10 +38,15 @@ export type EnsureResult =
       parentId: string;
       parentName: string;
       summary: string;
+      monthFolder: string;
+      docTitle: string;
+      yearName: string;
     };
 
 export interface EnsureOptions {
   allowCreate?: boolean;
+  /** Create only a missing year folder, then stop so the year folder can be picked through. */
+  createYearOnly?: boolean;
   knownFiles?: DriveFile[];
 }
 
@@ -153,15 +158,26 @@ export async function ensureMonthDoc(drive: DriveIO, at: Date, options: EnsureOp
     if (existing) return { ok: true, docId: existing.id };
   }
   steps.push(`Doc “${title}” inside ${monthName}`);
-  if (!options.allowCreate) {
-    return {
-      ok: false,
-      code: "pick-then-create",
-      parentId: yearId ?? config.journal.personalFolderId,
-      parentName: yearId ? yearName : "Personal",
-      summary: steps.join("\n"),
-    };
+  const plan = {
+    ok: false as const,
+    code: "pick-then-create" as const,
+    parentId: yearId ?? config.journal.personalFolderId,
+    parentName: yearId ? yearName : "Personal",
+    summary: steps.filter((step) => (options.createYearOnly ? step.startsWith("Folder") && step.includes(`“${yearName}”`) : true)).join("\n"),
+    monthFolder: monthName,
+    docTitle: title,
+    yearName,
+  };
+  if (options.createYearOnly) {
+    if (!yearId) {
+      const created = await drive.createFolder(yearName, config.journal.personalFolderId);
+      if (isAccountabilityName(created.name)) throw new Error("Refusing to create a blocked file");
+      yearId = created.id;
+    }
+    const rest = steps.filter((step) => !step.includes(`“${yearName}” inside Personal`));
+    return { ...plan, parentId: yearId, parentName: yearName, summary: rest.join("\n") };
   }
+  if (!options.allowCreate) return plan;
 
   let monthParent = yearId;
   if (!monthParent) {
@@ -176,6 +192,18 @@ export async function ensureMonthDoc(drive: DriveIO, at: Date, options: EnsureOp
   const created = await drive.createDoc(title, docParent);
   if (isAccountabilityName(created.name)) throw new Error("Refusing to use a blocked file");
   return { ok: true, docId: created.id };
+}
+
+/** Create is offered only after the picker has been opened on the folder that can show the month. */
+export function nextCreateStep(parentName: string, opened: { year: boolean; personal: boolean }): "open-picker" | "confirm-month" | "confirm-year" {
+  const onYear = parentName !== "Personal";
+  if (onYear && opened.year) return "confirm-month";
+  if (!onYear && opened.personal) return "confirm-year";
+  return "open-picker";
+}
+
+export function monthCreateMessage(monthFolder: string, docTitle: string): string {
+  return `If you see “${monthFolder}” or “${docTitle}”, choose that. Create only if neither exists.`;
 }
 
 function grant(target: "personal" | "year" | "month" | "doc", id: string, label: string): EnsureResult {

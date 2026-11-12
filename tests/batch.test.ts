@@ -5,15 +5,15 @@ import { DIVIDER, KICKER, renderDocument } from "../src/journal/text";
 import { applyDoc, paragraphRangesStayInside } from "./applyDoc";
 import { entryOne, entryTwo } from "./fixtures";
 
-function hex(style: TextStyle | undefined): string {
-  const rgb = style?.foregroundColor.color.rgbColor;
+function hex(style: Partial<TextStyle> | undefined): string {
+  const rgb = style?.foregroundColor?.color.rgbColor;
   if (!rgb) return "";
   const channel = (value: number) => Math.round(value * 255).toString(16).padStart(2, "0").toUpperCase();
   return `#${channel(rgb.red)}${channel(rgb.green)}${channel(rgb.blue)}`;
 }
 
-function background(style: TextStyle | undefined): string {
-  const rgb = style?.backgroundColor.color?.rgbColor;
+function background(style: Partial<TextStyle> | undefined): string {
+  const rgb = style?.backgroundColor?.color?.rgbColor;
   if (!rgb) return "";
   const channel = (value: number) => Math.round(value * 255).toString(16).padStart(2, "0").toUpperCase();
   return `#${channel(rgb.red)}${channel(rgb.green)}${channel(rgb.blue)}`;
@@ -70,14 +70,19 @@ describe("entry batchUpdate builder", () => {
     const titleText = "Placeholder Title  \u{1F610}";
     const title = byText.get(titleText);
     expect(title?.para).toEqual({ namedStyleType: "HEADING_1", lineSpacing: 100 });
-    expect(title?.textStyle).toBeUndefined();
+    expect(title?.textStyle).toEqual({});
     const titleStart = template.indexOf(titleText) + 1;
     const titleStyle = body.requests.find((request) => request.updateParagraphStyle?.range.startIndex === titleStart);
-    expect(titleStyle?.updateParagraphStyle?.fields).toBe("namedStyleType,lineSpacing");
-    expect(body.requests.some((request) => request.updateTextStyle?.range.startIndex === titleStart)).toBe(false);
+    expect(titleStyle?.updateParagraphStyle?.fields).toBe("namedStyleType,lineSpacing,spaceAbove,spaceBelow");
+    expect(titleStyle?.updateParagraphStyle?.paragraphStyle.spaceAbove).toBeUndefined();
+    expect(titleStyle?.updateParagraphStyle?.paragraphStyle.spaceBelow).toBeUndefined();
+    const titleTextReset = body.requests.find((request) => request.updateTextStyle?.range.startIndex === titleStart);
+    expect(titleTextReset?.updateTextStyle?.textStyle).toEqual({});
+    expect(titleTextReset?.updateTextStyle?.fields).toContain("weightedFontFamily");
+    expect(titleTextReset?.updateTextStyle?.fields).toContain("link");
 
     const mood = byText.get("Mood: calm, focused");
-    expect(mood?.textStyle?.weightedFontFamily.fontFamily).toBe("Arial");
+    expect(mood?.textStyle?.weightedFontFamily?.fontFamily).toBe("Arial");
     expect(mood?.textStyle?.italic).toBe(true);
     expect(mood?.textStyle?.fontSize).toEqual({ magnitude: 10, unit: "PT" });
     expect(hex(mood?.textStyle)).toBe("#5F6368");
@@ -98,7 +103,7 @@ describe("entry batchUpdate builder", () => {
     expect(bodyLine?.para?.lineSpacing).toBe(100);
 
     const tags = byText.get("#calm #focused  \u00b7  #placeholder");
-    expect(tags?.textStyle?.weightedFontFamily.fontFamily).toBe("Arial");
+    expect(tags?.textStyle?.weightedFontFamily?.fontFamily).toBe("Arial");
     expect(tags?.textStyle?.italic).toBe(true);
     expect(tags?.textStyle?.fontSize).toEqual({ magnitude: 10, unit: "PT" });
     expect(hex(tags?.textStyle)).toBe("#5F6368");
@@ -143,8 +148,8 @@ describe("entry batchUpdate builder", () => {
     expect(applied.text).toContain("Placeholder Title  \u{1F610}");
     expect(applied.text).toContain("Source: journal-app\n\u2501");
     const count = applied.paragraphs.find((paragraph) => paragraph.text.startsWith("2 entries"));
-    expect(count?.textStyle?.weightedFontFamily.fontFamily).toBe("Lato");
-    expect(count?.textStyle?.fontSize.magnitude).toBe(10);
+    expect(count?.textStyle?.weightedFontFamily?.fontFamily).toBe("Lato");
+    expect(count?.textStyle?.fontSize?.magnitude).toBe(10);
     expect(hex(count?.textStyle)).toBe("#5F6368");
     expect(count?.para?.lineSpacing).toBe(115);
     const between = applied.paragraphs.filter((paragraph) => paragraph.text === DIVIDER);

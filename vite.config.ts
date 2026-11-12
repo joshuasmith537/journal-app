@@ -6,12 +6,12 @@ import { defineConfig, type Plugin } from "vitest/config";
 
 const CSP = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-eval' https://accounts.google.com https://apis.google.com https://www.gstatic.com",
-  "style-src 'self' 'unsafe-inline' https://accounts.google.com https://www.gstatic.com",
-  "img-src 'self' data:",
-  "font-src 'self'",
-  "connect-src 'self' https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com https://docs.googleapis.com https://api.open-meteo.com https://geocoding-api.open-meteo.com",
-  "frame-src https://accounts.google.com https://docs.google.com https://drive.google.com https://content.googleapis.com https://www.google.com",
+  "script-src 'self' 'unsafe-eval' https://accounts.google.com https://apis.google.com https://*.gstatic.com",
+  "style-src 'self' 'unsafe-inline' https://accounts.google.com https://*.gstatic.com",
+  "img-src 'self' data: https://*.gstatic.com https://*.googleusercontent.com",
+  "font-src 'self' https://*.gstatic.com",
+  "connect-src 'self' https://accounts.google.com https://www.googleapis.com https://content.googleapis.com https://docs.googleapis.com https://oauth2.googleapis.com https://api.open-meteo.com https://geocoding-api.open-meteo.com",
+  "frame-src https://accounts.google.com https://apis.google.com https://docs.google.com https://drive.google.com https://content.googleapis.com",
   "worker-src 'self'",
   "manifest-src 'self'",
   "object-src 'none'",

@@ -38,7 +38,7 @@ export interface DocRequest {
   deleteContentRange?: { range: { startIndex: number; endIndex: number } };
   updateTextStyle?: {
     range: { startIndex: number; endIndex: number };
-    textStyle: TextStyle;
+    textStyle: Partial<TextStyle>;
     fields: string;
   };
   updateParagraphStyle?: {
@@ -57,8 +57,11 @@ export interface BatchUpdateBody {
 
 export const TEXT_FIELDS =
   "bold,italic,underline,strikethrough,fontSize,foregroundColor,backgroundColor,weightedFontFamily";
+/** Clears every inline text field this app sets, so the named paragraph style shows through. */
+export const RESET_TEXT_FIELDS =
+  "fontFamily,weightedFontFamily,fontSize,foregroundColor,backgroundColor,bold,italic,underline,strikethrough,link";
 const SPACED_PARA_FIELDS = "namedStyleType,lineSpacing,spaceAbove,spaceBelow";
-const TITLE_PARA_FIELDS = "namedStyleType,lineSpacing";
+const TITLE_PARA_FIELDS = "namedStyleType,lineSpacing,spaceAbove,spaceBelow";
 const ENTRY_LINE_SPACING = 100;
 const BANNER_LINE_SPACING = 115;
 
@@ -104,43 +107,46 @@ function spacedParagraph(lineSpacing: number): { paragraph: ParagraphStyle; fiel
   };
 }
 
-function stylesFor(kind: LineKind): { text: TextStyle | null; paragraph: ParagraphStyle; fields: string } {
+function stylesFor(kind: LineKind): { text: Partial<TextStyle> | null; paragraph: ParagraphStyle; fields: string; textFields: string } {
   const entry = spacedParagraph(ENTRY_LINE_SPACING);
   const banner = spacedParagraph(BANNER_LINE_SPACING);
+  const body = textStyle({ font: "Arial", size: 11, color: "#000000" });
   const status = textStyle({ font: "Arial", size: 8, color: "#9AA0A6" });
+  const styled = { textFields: TEXT_FIELDS };
   switch (kind) {
     case "kicker":
-      return { ...banner, text: textStyle({ font: "Montserrat", size: 9, color: "#1A73E8", bold: true }) };
+      return { ...banner, ...styled, text: textStyle({ font: "Montserrat", size: 9, color: "#1A73E8", bold: true }) };
     case "month":
-      return { ...banner, text: textStyle({ font: "Montserrat", size: 34, color: "#202124" }) };
+      return { ...banner, ...styled, text: textStyle({ font: "Montserrat", size: 34, color: "#202124" }) };
     case "count":
-      return { ...banner, text: textStyle({ font: "Lato", size: 10, color: "#5F6368" }) };
+      return { ...banner, ...styled, text: textStyle({ font: "Lato", size: 10, color: "#5F6368" }) };
     case "bannerDivider":
-      return { ...banner, text: textStyle({ font: "Arial", size: 11, color: "#DADCE0" }) };
+      return { ...banner, ...styled, text: textStyle({ font: "Arial", size: 11, color: "#DADCE0" }) };
     case "bannerBlank":
-      return { ...banner, text: null };
+      return { ...banner, ...styled, text: body };
     case "divider":
-      return { ...entry, text: textStyle({ font: "Arial", size: 11, color: "#DADCE0" }) };
+      return { ...entry, ...styled, text: textStyle({ font: "Arial", size: 11, color: "#DADCE0" }) };
     case "date":
-      return { ...entry, text: textStyle({ font: "Arial", size: 9, color: "#1A73E8", bold: true }) };
+      return { ...entry, ...styled, text: textStyle({ font: "Arial", size: 9, color: "#1A73E8", bold: true }) };
     case "title":
       return {
         paragraph: { namedStyleType: "HEADING_1", lineSpacing: ENTRY_LINE_SPACING },
         fields: TITLE_PARA_FIELDS,
-        text: null,
+        text: {},
+        textFields: RESET_TEXT_FIELDS,
       };
     case "mood":
     case "tags":
-      return { ...entry, text: textStyle({ font: "Arial", size: 10, color: "#5F6368", italic: true }) };
+      return { ...entry, ...styled, text: textStyle({ font: "Arial", size: 10, color: "#5F6368", italic: true }) };
     case "info":
-      return { ...entry, text: textStyle({ font: "Arial", size: 9, color: "#3C4043", background: "#F1F3F4" }) };
+      return { ...entry, ...styled, text: textStyle({ font: "Arial", size: 9, color: "#3C4043", background: "#F1F3F4" }) };
     case "blank":
-      return { ...entry, text: null };
+      return { ...entry, ...styled, text: body };
     case "body":
-      return { ...entry, text: textStyle({ font: "Arial", size: 11, color: "#000000" }) };
+      return { ...entry, ...styled, text: body };
     case "status":
     case "source":
-      return { ...entry, text: status };
+      return { ...entry, ...styled, text: status };
     default: {
       const exhaustive: never = kind;
       throw new Error(`Unknown line kind ${exhaustive}`);
@@ -195,12 +201,13 @@ function styleRequests(items: Layout[], segmentEnd: number): DocRequest[] {
         },
       });
     }
-    if (item.textEnd > item.textStart && styles.text) {
+    const textEnd = Math.min(item.paraEnd, segmentEnd - 1);
+    if (styles.text && textEnd > item.textStart) {
       requests.push({
         updateTextStyle: {
-          range: { startIndex: item.textStart, endIndex: item.textEnd },
+          range: { startIndex: item.textStart, endIndex: textEnd },
           textStyle: styles.text,
-          fields: TEXT_FIELDS,
+          fields: styles.textFields,
         },
       });
     }
@@ -330,8 +337,10 @@ export function buildAppendRequests(doc: JournalDocument, revisionId: string, en
   const next = countLine(found.count + 1);
   const delta = next.length - found.text.length;
   const plan = planAppend(doc, found.count, entry);
+  const surplus = surplusBlankDelete(doc, delta);
+  const removed = surplus ? surplus.endIndex - surplus.startIndex : 0;
   const insertAt = plan.index + delta;
-  const segmentEnd = doc.endIndex + delta + plan.insertText.length;
+  const segmentEnd = doc.endIndex + delta - removed + plan.insertText.length;
   const countLayout: Layout = {
     kind: "count",
     textStart: found.start,
@@ -343,11 +352,22 @@ export function buildAppendRequests(doc: JournalDocument, revisionId: string, en
       { deleteContentRange: { range: { startIndex: found.start, endIndex: found.start + found.text.length } } },
       { insertText: { location: { index: found.start }, text: next } },
       ...styleRequests([countLayout], doc.endIndex + delta),
+      ...(surplus ? [{ deleteContentRange: { range: surplus } }] : []),
       { insertText: { location: { index: insertAt }, text: plan.insertText } },
       ...styleRequests(layouts(plan.insertText, insertAt, plan.lines, plan.skipLeadingNewline), segmentEnd),
     ],
     revisionId,
   );
+}
+
+/** Deletes empty-paragraph newlines after the last real paragraph, keeping the final newline. */
+function surplusBlankDelete(doc: JournalDocument, delta: number): { startIndex: number; endIndex: number } | null {
+  const last = [...doc.paragraphs].reverse().find((paragraph) => paragraph.text !== "");
+  if (!last) return null;
+  const startIndex = last.endIndex + delta;
+  const endIndex = doc.endIndex - 1 + delta;
+  if (startIndex >= endIndex) return null;
+  return { startIndex, endIndex };
 }
 
 /** Empty docs get a banner plus the entry. Anything else is an append. A doc with no banner is refused. */

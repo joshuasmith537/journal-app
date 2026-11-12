@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { config, isConfigured } from "../src/config";
-import { DRIVE_SCOPE, authPrompt, pickerParent } from "../src/google/auth";
+import { DRIVE_SCOPE, authPrompt, pickerParent, scopeWasGranted } from "../src/google/auth";
 import { buildAppendRequests, buildCreateRequests } from "../src/journal/batch";
 import { cacheWarning, entryAlreadyInDocument, parseJournal } from "../src/journal/parse";
 import { readDocsBody, structureFromPlainText, UnreadableDocumentError } from "../src/journal/structure";
@@ -9,10 +9,12 @@ import {
   DOC_MIME,
   FOLDER_MIME,
   ensureMonthDoc,
+  monthCreateMessage,
+  nextCreateStep,
   publishEntry,
   type DriveIO,
 } from "../src/journal/sync";
-import { formatHashtags, renderBanner, renderDocument, type JournalEntry } from "../src/journal/text";
+import { formatHashtags, renderBanner, renderDocument, stripDocsControls, type JournalEntry } from "../src/journal/text";
 import { chooseWeather } from "../src/weather";
 import { placeCspMeta } from "../src/cspMeta";
 import { applyDoc, paragraphRangesStayInside } from "./applyDoc";
@@ -172,6 +174,26 @@ describe("new month creation", () => {
     expect(created).toEqual(["2027", "01 - January", "Personal Journal \u2013 January 2027"]);
   });
 
+  it("creates only the year folder when the year itself was not visible", async () => {
+    const created: string[] = [];
+    const drive = memoryDrive(created);
+    const at = new Date("2027-01-15T18:00:00.000Z");
+    const yearOnly = await ensureMonthDoc(drive, at, { createYearOnly: true });
+    expect(created).toEqual(["2027"]);
+    expect(yearOnly).toMatchObject({ ok: false, code: "pick-then-create", parentName: "2027" });
+    if (yearOnly.ok || yearOnly.code !== "pick-then-create") throw new Error("expected a plan");
+    expect(yearOnly.summary).not.toContain("Folder “2027” inside Personal");
+    expect(yearOnly.monthFolder).toBe("01 - January");
+    expect(yearOnly.docTitle).toBe("Personal Journal \u2013 January 2027");
+    expect(nextCreateStep("Personal", { year: false, personal: false })).toBe("open-picker");
+    expect(nextCreateStep("Personal", { year: false, personal: true })).toBe("confirm-year");
+    expect(nextCreateStep("2027", { year: false, personal: true })).toBe("open-picker");
+    expect(nextCreateStep("2027", { year: true, personal: true })).toBe("confirm-month");
+    expect(monthCreateMessage(yearOnly.monthFolder, yearOnly.docTitle)).toBe(
+      "If you see “01 - January” or “Personal Journal \u2013 January 2027”, choose that. Create only if neither exists.",
+    );
+  });
+
   it("does not aim the picker at an Accountability location", () => {
     expect(pickerParent("abc", "Accountability Journal")).toBeUndefined();
     expect(pickerParent("abc", "Personal")).toBe("abc");
@@ -227,6 +249,27 @@ describe("live journal text", () => {
   });
 });
 
+describe("inherited Docs styles", () => {
+  it("clears an appended title and keeps blank lines at 11pt", () => {
+    const created = buildCreateRequests(entryOne, "rev-a");
+    const doc = structureFromPlainText(applyDoc(created.requests).text);
+    const appended = buildAppendRequests(doc, "rev-b", entryTwo);
+    const applied = applyDoc([...created.requests, ...appended.requests]);
+    const titles = applied.paragraphs.filter((paragraph) => paragraph.text.startsWith("Placeholder"));
+    expect(titles[1]?.textStyle).toEqual({});
+    const entryBlanks = applied.paragraphs.filter((paragraph) => paragraph.text === "" && paragraph.para?.lineSpacing === 100);
+    expect(entryBlanks.length).toBeGreaterThan(0);
+    expect(entryBlanks.every((paragraph) => paragraph.textStyle?.fontSize?.magnitude === 11)).toBe(true);
+    expect(entryBlanks.every((paragraph) => paragraph.textStyle?.weightedFontFamily?.fontFamily === "Arial")).toBe(true);
+  });
+
+  it("does not leave an empty paragraph when the doc already ends with two", () => {
+    const trailing = `${renderDocument([entryOne])}\n\n`;
+    const applied = applyDoc(buildAppendRequests(structureFromPlainText(trailing), "rev", entryTwo).requests, trailing);
+    expect(applied.text).toBe(renderDocument([entryOne, entryTwo]));
+  });
+});
+
 describe("smaller review fixes", () => {
   it("uses a referrer policy the Picker API key can see", () => {
     const html = readFileSync("index.html", "utf8");
@@ -265,6 +308,12 @@ describe("smaller review fixes", () => {
   it("asks for consent only before the first grant", () => {
     expect(authPrompt(false)).toBe("consent");
     expect(authPrompt(true)).toBe("");
+    expect(scopeWasGranted(undefined, {}, DRIVE_SCOPE)).toBe(true);
+    expect(scopeWasGranted(() => false, {}, DRIVE_SCOPE)).toBe(false);
+  });
+
+  it("strips control characters Docs would drop and keeps tabs and newlines", () => {
+    expect(stripDocsControls("a\nb\tc\u0000\u0007\u000C\uE000")).toBe("a\nb\tc");
   });
 
   it("uses fresh weather when online and the previous value when not", () => {

@@ -226,21 +226,29 @@ export interface MarkedLine {
   text: string;
 }
 
+/** Docs drops these characters. Tabs and newlines are kept. */
+export function stripDocsControls(value: string): string {
+  return value.replace(/[\u0000-\u0008\u000C-\u001F\uE000-\uF8FF]/g, "");
+}
+
 export function entryLines(entry: JournalEntry): MarkedLine[] {
+  const title = stripDocsControls(entry.title);
+  const moodWords = stripDocsControls(entry.moodWords).trim();
+  const place = stripDocsControls(entry.place);
+  const body = stripDocsControls(entry.body).replace(/\n+$/, "");
   const lines: MarkedLine[] = [
     { kind: "date", text: formatDateLine(entry.at) },
-    { kind: "title", text: `${entry.title}  ${entry.mood}` },
-    ...(entry.moodWords.trim() ? [{ kind: "mood" as const, text: `Mood: ${entry.moodWords.trim()}` }] : []),
-    { kind: "info", text: formatInfoLine(entry.at, entry.place, entry.weather) },
+    { kind: "title", text: `${title}  ${entry.mood}` },
+    ...(moodWords ? [{ kind: "mood" as const, text: `Mood: ${moodWords}` }] : []),
+    { kind: "info", text: formatInfoLine(entry.at, place, entry.weather ? stripDocsControls(entry.weather) : null) },
     { kind: "blank", text: "" },
   ];
-  const body = entry.body.replace(/\n+$/, "");
   if (body.length) {
     for (const line of body.split("\n")) {
       lines.push({ kind: line === "" ? "blank" : "body", text: line });
     }
   }
-  const tags = formatHashtags(entry.moodTags, entry.topicTags);
+  const tags = formatHashtags(entry.moodTags.map(stripDocsControls), entry.topicTags.map(stripDocsControls));
   if (tags) lines.push({ kind: "tags", text: tags });
   lines.push({ kind: "status", text: `Journal: ${monthLabel(entry.at)}${NARROW}${entry.status}` });
   lines.push({ kind: "source", text: SOURCE_LINE });

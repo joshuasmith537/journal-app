@@ -22,13 +22,13 @@ export function paragraphRangesStayInside(requests: DocRequest[], initial = "\n"
 
 export interface AppliedParagraph {
   text: string;
-  textStyle?: TextStyle;
+  textStyle?: Partial<TextStyle>;
   para?: ParagraphStyle;
 }
 
 export function applyDoc(requests: DocRequest[], initial = "\n"): { text: string; paragraphs: AppliedParagraph[] } {
   let text = initial;
-  let textStyles: Array<TextStyle | undefined> = new Array(text.length);
+  let textStyles: Array<Partial<TextStyle> | undefined> = new Array(text.length);
   let paraStyles: Array<ParagraphStyle | undefined> = new Array(text.length);
 
   const boundary = (index: number) => {
@@ -46,9 +46,12 @@ export function applyDoc(requests: DocRequest[], initial = "\n"): { text: string
       const at = request.insertText.location.index - 1;
       boundary(at);
       text = text.slice(0, at) + request.insertText.text + text.slice(at);
-      const blank = new Array<undefined>(request.insertText.text.length);
-      textStyles.splice(at, 0, ...blank);
-      paraStyles.splice(at, 0, ...blank);
+      const inheritedText = at > 0 ? textStyles[at - 1] : undefined;
+      const inheritedPara = at > 0 ? paraStyles[at - 1] : undefined;
+      const addedText = new Array<Partial<TextStyle> | undefined>(request.insertText.text.length).fill(inheritedText);
+      const addedPara = new Array<ParagraphStyle | undefined>(request.insertText.text.length).fill(inheritedPara);
+      textStyles.splice(at, 0, ...addedText);
+      paraStyles.splice(at, 0, ...addedPara);
     } else if (request.deleteContentRange) {
       const start = request.deleteContentRange.range.startIndex - 1;
       const end = request.deleteContentRange.range.endIndex - 1;
@@ -86,7 +89,7 @@ export function applyDoc(requests: DocRequest[], initial = "\n"): { text: string
     }
     paragraphs.push({
       text: slice,
-      textStyle: slice.length ? textStyles[cursor] : undefined,
+      textStyle: slice.length ? textStyles[cursor] : textStyles[newline],
       para: paraStyles[newline] ?? (slice.length ? paraStyles[cursor] : undefined),
     });
     cursor = newline + 1;

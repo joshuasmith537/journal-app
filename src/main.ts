@@ -5,7 +5,7 @@ import { currentToken, initAuth, loadGoogle, openJournalPicker, pickerParent, re
 import { GoogleDrive } from "./google/client";
 import { cacheWarning, parseJournal } from "./journal/parse";
 import { filterDriveFiles } from "./journal/accountability";
-import { DOC_MIME, type DriveFile, publishEntry } from "./journal/sync";
+import { DOC_MIME, type DriveFile, monthCreateMessage, nextCreateStep, publishEntry } from "./journal/sync";
 import {
   MOODS,
   type JournalEntry,
@@ -15,6 +15,7 @@ import {
   formatDateLine,
   formatHashtags,
   formatInfoLine,
+  stripDocsControls,
 } from "./journal/text";
 import { chooseWeather, lookupWeather } from "./weather";
 
@@ -67,7 +68,14 @@ interface ViewEntry {
 type Route = { name: "write" } | { name: "entries" } | { name: "entry"; id: string };
 type Confirm =
   | { kind: "grant"; label: string }
-  | { kind: "create"; summary: string; parentId: string; parentName: string }
+  | {
+      kind: "create";
+      summary: string;
+      message: string;
+      parentId: string;
+      parentName: string;
+      createYearOnly?: boolean;
+    }
   | null;
 
 const app = document.querySelector<HTMLElement>("#app");
@@ -83,6 +91,7 @@ const state: {
   readNote: string;
   confirm: Confirm;
   googleReady: boolean;
+  syncedFrom: Map<string, { at: string; title: string }>;
 } = {
   draft: emptyDraft(),
   queue: [],
@@ -93,9 +102,17 @@ const state: {
   readNote: "",
   confirm: null,
   googleReady: false,
+  syncedFrom: new Map(),
 };
 
 let chain: Promise<void> = Promise.resolve();
+
+function keepChain(task: () => Promise<void>): void {
+  chain = chain.then(task).catch((err: unknown) => {
+    state.note = err instanceof Error ? err.message : "Something went wrong. The entry is still on this device.";
+    setNote();
+  });
+}
 let dateNode: HTMLElement | null = null;
 let weatherNode: HTMLElement | null = null;
 let noteNode: HTMLElement | null = null;
@@ -123,7 +140,7 @@ async function boot(): Promise<void> {
     paint();
   });
   window.addEventListener("online", () => {
-    chain = chain.then(() => flush());
+    keepChain(() => flush());
   });
   subscribeAuth((token, error) => {
     if (error) {
@@ -131,7 +148,7 @@ async function boot(): Promise<void> {
       paint();
       return;
     }
-    if (token) chain = chain.then(() => flush());
+    if (token) keepChain(() => flush());
     paint();
   });
   if (isConfigured()) {
@@ -163,13 +180,17 @@ function onPublish(): void {
   }
   const needsAuth = navigator.onLine && isConfigured() && state.googleReady && !currentToken();
   if (needsAuth) requestToken();
-  chain = chain.then(() => publishCurrentDraft());
-  if (!needsAuth) chain = chain.then(() => flush());
+  keepChain(() => publishCurrentDraft());
+  if (!needsAuth) keepChain(() => flush());
 }
 
 async function publishCurrentDraft(): Promise<void> {
   const cached = state.draft.weather;
-  const fresh = navigator.onLine ? await lookupWeather(state.draft.place || "Chicago, IL") : null;
+  if (navigator.onLine) {
+    state.note = "Getting weather…";
+    setNote();
+  }
+  const fresh = navigator.onLine ? await lookupWeather(state.draft.place || "Chicago, IL", 5000) : null;
   state.draft.weather = chooseWeather(navigator.onLine, fresh, cached);
   const entry = entryFromDraft();
   if (!entry) return;
@@ -203,7 +224,7 @@ async function finishPublish(entry: JournalEntry): Promise<void> {
   void refreshWeather();
 }
 
-async function flush(options?: { allowCreate?: boolean; pickerOffered?: boolean }): Promise<void> {
+async function flush(options?: { allowCreate?: boolean; createYearOnly?: boolean; yearPickerOpened?: boolean; personalPickerOpened?: boolean }): Promise<void> {
   if (!navigator.onLine || !currentToken() || !isConfigured()) return;
   const token = currentToken();
   if (!token) return;
@@ -214,27 +235,57 @@ async function flush(options?: { allowCreate?: boolean; pickerOffered?: boolean 
     try {
       const result = await publishEntry(drive, queuedToEntry(item), {
         allowCreate: options?.allowCreate ?? false,
+        createYearOnly: options?.createYearOnly ?? false,
         knownFiles: state.picked,
       });
-      if (!result.ok && result.code === "pick-then-create" && !options?.pickerOffered) {
+      if (!result.ok && result.code === "pick-then-create") {
+        const onYear = result.parentName !== "Personal";
+        const step = nextCreateStep(result.parentName, {
+          year: Boolean(options?.yearPickerOpened),
+          personal: Boolean(options?.personalPickerOpened),
+        });
+        if (step === "confirm-month") {
+          state.confirm = {
+            kind: "create",
+            summary: result.summary,
+            parentId: result.parentId,
+            parentName: result.parentName,
+            message: monthCreateMessage(result.monthFolder, result.docTitle),
+          };
+          state.note = "";
+          paint();
+          return;
+        }
+        if (step === "confirm-year") {
+          state.confirm = {
+            kind: "create",
+            summary: `Folder “${result.yearName}” inside Personal`,
+            parentId: result.parentId,
+            parentName: result.parentName,
+            createYearOnly: true,
+            message: `If you don't see folder “${result.yearName}” in Personal, create it. Then check that year for “${result.monthFolder}” or “${result.docTitle}”.`,
+          };
+          state.note = "";
+          paint();
+          return;
+        }
         const parent = pickerParent(result.parentId, result.parentName);
         const picked = await openJournalPicker(token, parent ? { id: parent, name: result.parentName } : undefined);
         await remember(picked);
-        await flush({ allowCreate: false, pickerOffered: true });
+        await flush({ personalPickerOpened: true, yearPickerOpened: onYear });
         return;
       }
       if (!result.ok) {
-        state.confirm =
-          result.code === "grant"
-            ? { kind: "grant", label: result.label }
-            : { kind: "create", summary: result.summary, parentId: result.parentId, parentName: result.parentName };
+        state.confirm = { kind: "grant", label: result.label };
         state.note = "";
         paint();
         return;
       }
+      const queuedId = item.id;
       state.queue.shift();
       state.confirm = null;
       wrote = true;
+      state.syncedFrom.set(queuedId, { at: item.at, title: item.title });
       await kvSet("queue", state.queue);
       await remember([{ id: result.docId, name: docTitle(new Date(item.at)), mimeType: DOC_MIME }]);
       options = { allowCreate: false };
@@ -246,6 +297,18 @@ async function flush(options?: { allowCreate?: boolean; pickerOffered?: boolean 
     }
   }
   await refreshCache(token);
+  if (state.route.name === "entry") {
+    const pendingView = state.syncedFrom.get(state.route.id);
+    if (pendingView) {
+      const identity = entryIdentity(new Date(pendingView.at), stripDocsControls(pendingView.title));
+      const match = state.cache.find((entry) => entry.id.endsWith(identity));
+      state.syncedFrom.delete(state.route.id);
+      if (match) {
+        location.hash = `#/e/${encodeURIComponent(match.id)}`;
+        state.route = parseRoute();
+      }
+    }
+  }
   if (wrote) state.note = "Synced to Drive.";
   paint();
 }
@@ -292,7 +355,7 @@ async function chooseFiles(): Promise<void> {
   );
   await remember(picked);
   state.confirm = null;
-  chain = chain.then(() => flush());
+  keepChain(() => flush({ yearPickerOpened: createParent?.parentName !== "Personal", personalPickerOpened: true }));
 }
 
 async function remember(files: DriveFile[]): Promise<void> {
@@ -350,8 +413,9 @@ function bindRoute(): void {
     });
   });
   document.querySelector("#create-doc")?.addEventListener("click", () => {
+    const yearOnly = state.confirm?.kind === "create" && state.confirm.createYearOnly;
     state.confirm = null;
-    chain = chain.then(() => flush({ allowCreate: true, pickerOffered: true }));
+    keepChain(() => flush(yearOnly ? { createYearOnly: true, personalPickerOpened: true } : { allowCreate: true, yearPickerOpened: true }));
   });
   document.querySelector("#back")?.addEventListener("click", () => {
     location.hash = "#/entries";
@@ -456,7 +520,7 @@ function confirmBanner(): HTMLElement | null {
     );
   }
   return h("div", { class: "banner" },
-    h("p", null, "No matching folder or doc is shared with this app. Create exactly this?"),
+    h("p", null, state.confirm.message),
     h("p", { class: "plan" }, state.confirm.summary),
     h("div", { class: "row" },
       h("button", { type: "button", id: "create-doc" }, "Create"),

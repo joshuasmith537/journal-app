@@ -127,7 +127,8 @@ function tryParseBlock(input: string[]): JournalEntry | null {
   let moodTags: string[] = [];
   let topicTags: string[] = [];
   const maybeTags = lines.at(-1) ?? "";
-  if (maybeTags.startsWith("#") || maybeTags.startsWith(`  ${DOT}`)) {
+  const hadTags = maybeTags.startsWith("#") || maybeTags.startsWith(`  ${DOT}`);
+  if (hadTags) {
     const parsed = parseTags(lines.pop() ?? "");
     moodTags = parsed.moodTags;
     topicTags = parsed.topicTags;
@@ -153,6 +154,7 @@ function tryParseBlock(input: string[]): JournalEntry | null {
     bodyLines = lines.slice(4);
   }
   if (infoLine === undefined || blank !== "") return null;
+  if (hadTags && bodyLines.at(-1) === "") bodyLines.pop();
   const info = tryParseInfo(infoLine);
   if (!info) return null;
   return {

@@ -28,7 +28,7 @@ const MONTH_INDEX: Record<string, number> = {
 
 const DATE_RE = /^([A-Za-z]+), ([A-Za-z]+) (\d{1,2}), (\d{4})\s+\u00b7\s+(.+)$/;
 const COUNT_RE = /^(\d+) (entry|entries) {2}\u00b7 {2}Journal: Personal$/;
-const STATUS_RE = new RegExp(`^Journal: (.+)${escapeRegExp(NARROW)}(Published|Draft)$`);
+const STATUS_RE = new RegExp(`^(?:Imported from )?Journal: (.+)${escapeRegExp(NARROW)}(Published|Draft)$`);
 const TITLE_RE = new RegExp(`^(.*)  (${MOODS.join("|")})$`, "u");
 
 export interface ParsedJournal {

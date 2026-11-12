@@ -28,7 +28,7 @@ export class UnreadableDocumentError extends Error {
 interface RawElement {
   startIndex?: number;
   endIndex?: number;
-  textRun?: { content?: string };
+  textRun?: { content?: string; textStyle?: unknown };
   inlineObjectElement?: unknown;
   horizontalRule?: unknown;
   pageBreak?: unknown;

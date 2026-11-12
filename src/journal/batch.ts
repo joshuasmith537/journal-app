@@ -29,8 +29,8 @@ export interface TextStyle {
 export interface ParagraphStyle {
   namedStyleType: "NORMAL_TEXT" | "HEADING_1";
   lineSpacing: number;
-  spaceAbove: { magnitude: number; unit: "PT" };
-  spaceBelow: { magnitude: number; unit: "PT" };
+  spaceAbove?: { magnitude: number; unit: "PT" };
+  spaceBelow?: { magnitude: number; unit: "PT" };
 }
 
 export interface DocRequest {
@@ -46,6 +46,8 @@ export interface DocRequest {
     paragraphStyle: ParagraphStyle;
     fields: string;
   };
+  createHeader?: { type: "DEFAULT" };
+  updateNamedStyle?: { namedStyle: Record<string, unknown>; fields: string };
 }
 
 export interface BatchUpdateBody {
@@ -55,7 +57,10 @@ export interface BatchUpdateBody {
 
 export const TEXT_FIELDS =
   "bold,italic,underline,strikethrough,fontSize,foregroundColor,backgroundColor,weightedFontFamily";
-export const PARA_FIELDS = "namedStyleType,lineSpacing,spaceAbove,spaceBelow";
+const SPACED_PARA_FIELDS = "namedStyleType,lineSpacing,spaceAbove,spaceBelow";
+const TITLE_PARA_FIELDS = "namedStyleType,lineSpacing";
+const ENTRY_LINE_SPACING = 100;
+const BANNER_LINE_SPACING = 115;
 
 export function hexToRgb(hex: string): RgbColor {
   const value = hex.replace("#", "");
@@ -87,44 +92,55 @@ function textStyle(options: {
   };
 }
 
-function paragraphStyle(named: "NORMAL_TEXT" | "HEADING_1"): ParagraphStyle {
+function spacedParagraph(lineSpacing: number): { paragraph: ParagraphStyle; fields: string } {
   return {
-    namedStyleType: named,
-    lineSpacing: 100,
-    spaceAbove: { magnitude: 0, unit: "PT" },
-    spaceBelow: { magnitude: 0, unit: "PT" },
+    paragraph: {
+      namedStyleType: "NORMAL_TEXT",
+      lineSpacing,
+      spaceAbove: { magnitude: 0, unit: "PT" },
+      spaceBelow: { magnitude: 0, unit: "PT" },
+    },
+    fields: SPACED_PARA_FIELDS,
   };
 }
 
-function stylesFor(kind: LineKind): { text: TextStyle | null; paragraph: ParagraphStyle } {
-  const normal = paragraphStyle("NORMAL_TEXT");
+function stylesFor(kind: LineKind): { text: TextStyle | null; paragraph: ParagraphStyle; fields: string } {
+  const entry = spacedParagraph(ENTRY_LINE_SPACING);
+  const banner = spacedParagraph(BANNER_LINE_SPACING);
+  const status = textStyle({ font: "Arial", size: 8, color: "#9AA0A6" });
   switch (kind) {
     case "kicker":
-      return { paragraph: normal, text: textStyle({ font: "Montserrat", size: 9, color: "#1A73E8", bold: true }) };
+      return { ...banner, text: textStyle({ font: "Montserrat", size: 9, color: "#1A73E8", bold: true }) };
     case "month":
-      return { paragraph: normal, text: textStyle({ font: "Montserrat", size: 34, color: "#202124" }) };
+      return { ...banner, text: textStyle({ font: "Montserrat", size: 34, color: "#202124" }) };
     case "count":
-      return { paragraph: normal, text: textStyle({ font: "Lato", size: 10, color: "#5F6368" }) };
+      return { ...banner, text: textStyle({ font: "Lato", size: 10, color: "#5F6368" }) };
+    case "bannerDivider":
+      return { ...banner, text: textStyle({ font: "Arial", size: 11, color: "#DADCE0" }) };
+    case "bannerBlank":
+      return { ...banner, text: null };
     case "divider":
-      return { paragraph: normal, text: textStyle({ font: "Arial", size: 11, color: "#DADCE0" }) };
+      return { ...entry, text: textStyle({ font: "Arial", size: 11, color: "#DADCE0" }) };
     case "date":
-      return { paragraph: normal, text: textStyle({ font: "Arial", size: 9, color: "#1A73E8", bold: true }) };
+      return { ...entry, text: textStyle({ font: "Arial", size: 9, color: "#1A73E8", bold: true }) };
     case "title":
-      return { paragraph: paragraphStyle("HEADING_1"), text: textStyle({ font: "Arial", size: 20, color: "#000000" }) };
+      return {
+        paragraph: { namedStyleType: "HEADING_1", lineSpacing: ENTRY_LINE_SPACING },
+        fields: TITLE_PARA_FIELDS,
+        text: null,
+      };
     case "mood":
     case "tags":
-      return { paragraph: normal, text: textStyle({ font: "Arial", size: 10, color: "#5F6368", italic: true }) };
+      return { ...entry, text: textStyle({ font: "Arial", size: 10, color: "#5F6368", italic: true }) };
     case "info":
-      return {
-        paragraph: normal,
-        text: textStyle({ font: "Arial", size: 9, color: "#3C4043", background: "#F1F3F4" }),
-      };
+      return { ...entry, text: textStyle({ font: "Arial", size: 9, color: "#3C4043", background: "#F1F3F4" }) };
     case "blank":
-      return { paragraph: normal, text: null };
+      return { ...entry, text: null };
     case "body":
+      return { ...entry, text: textStyle({ font: "Arial", size: 11, color: "#000000" }) };
     case "status":
     case "source":
-      return { paragraph: normal, text: textStyle({ font: "Arial", size: 11, color: "#000000" }) };
+      return { ...entry, text: status };
     default: {
       const exhaustive: never = kind;
       throw new Error(`Unknown line kind ${exhaustive}`);
@@ -174,8 +190,8 @@ function styleRequests(items: Layout[], segmentEnd: number): DocRequest[] {
       requests.push({
         updateParagraphStyle: {
           range: { startIndex: item.textStart, endIndex: paraEnd },
-          paragraphStyle: styles.paragraph,
-          fields: PARA_FIELDS,
+        paragraphStyle: styles.paragraph,
+        fields: styles.fields,
         },
       });
     }
@@ -210,11 +226,59 @@ export function buildCreateRequests(entry: JournalEntry, revisionId: string): Ba
   const segmentEnd = insertText.length + 2;
   return withLock(
     [
+      ...namedStyleRequests(),
+      { createHeader: { type: "DEFAULT" } },
       { insertText: { location: { index: 1 }, text: insertText } },
       ...styleRequests(layouts(insertText, 1, lines, false), segmentEnd),
     ],
     revisionId,
   );
+}
+
+function namedStyleRequests(): DocRequest[] {
+  const black = { color: { rgbColor: hexToRgb("#000000") } };
+  return [
+    {
+      updateNamedStyle: {
+        namedStyle: {
+          namedStyleType: "NORMAL_TEXT",
+          textStyle: {
+            bold: false,
+            italic: false,
+            fontSize: { magnitude: 11, unit: "PT" },
+            foregroundColor: black,
+            weightedFontFamily: { fontFamily: "Arial", weight: 400 },
+          },
+          paragraphStyle: {
+            lineSpacing: BANNER_LINE_SPACING,
+            spaceAbove: { magnitude: 0, unit: "PT" },
+            spaceBelow: { magnitude: 0, unit: "PT" },
+          },
+        },
+        fields: "namedStyleType,textStyle,paragraphStyle",
+      },
+    },
+    {
+      updateNamedStyle: {
+        namedStyle: {
+          namedStyleType: "HEADING_1",
+          textStyle: {
+            bold: false,
+            italic: false,
+            fontSize: { magnitude: 20, unit: "PT" },
+            foregroundColor: black,
+            weightedFontFamily: { fontFamily: "Arial", weight: 400 },
+          },
+          paragraphStyle: {
+            spaceAbove: { magnitude: 20, unit: "PT" },
+            spaceBelow: { magnitude: 6, unit: "PT" },
+          },
+        },
+        fields:
+          "namedStyleType,textStyle.bold,textStyle.italic,textStyle.fontSize,textStyle.foregroundColor,textStyle.weightedFontFamily,paragraphStyle.spaceAbove,paragraphStyle.spaceBelow",
+      },
+    },
+  ];
 }
 
 interface AppendPlan {
@@ -248,7 +312,7 @@ export function planAppend(doc: JournalDocument, count: number, entry: JournalEn
     return {
       index: doc.endIndex - 1,
       insertText: `\n\n${joined}`,
-      lines: [{ kind: "blank", text: "" }, ...entryOnly],
+      lines: [{ kind: "bannerBlank", text: "" }, ...entryOnly],
       skipLeadingNewline: true,
     };
   }

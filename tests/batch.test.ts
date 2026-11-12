@@ -35,58 +35,97 @@ describe("entry batchUpdate builder", () => {
     expect(kicker?.textStyle?.fontSize).toEqual({ magnitude: 9, unit: "PT" });
     expect(kicker?.textStyle?.bold).toBe(true);
     expect(hex(kicker?.textStyle)).toBe("#1A73E8");
-    expect(kicker?.para?.namedStyleType).toBe("NORMAL_TEXT");
+    expect(kicker?.para).toMatchObject({ namedStyleType: "NORMAL_TEXT", lineSpacing: 115, spaceAbove: { magnitude: 0, unit: "PT" }, spaceBelow: { magnitude: 0, unit: "PT" } });
 
     const month = byText.get("November 2026");
     expect(month?.textStyle?.weightedFontFamily).toEqual({ fontFamily: "Montserrat", weight: 400 });
     expect(month?.textStyle?.fontSize).toEqual({ magnitude: 34, unit: "PT" });
     expect(month?.textStyle?.bold).toBe(false);
     expect(hex(month?.textStyle)).toBe("#202124");
+    expect(month?.para?.lineSpacing).toBe(115);
 
     const count = byText.get("1 entry  \u00b7  Journal: Personal");
     expect(count?.textStyle?.weightedFontFamily).toEqual({ fontFamily: "Lato", weight: 400 });
     expect(count?.textStyle?.fontSize).toEqual({ magnitude: 10, unit: "PT" });
     expect(hex(count?.textStyle)).toBe("#5F6368");
+    expect(count?.para?.lineSpacing).toBe(115);
 
     const divider = byText.get(DIVIDER);
+    expect(divider?.textStyle?.weightedFontFamily).toEqual({ fontFamily: "Arial", weight: 400 });
+    expect(divider?.textStyle?.fontSize).toEqual({ magnitude: 11, unit: "PT" });
     expect(hex(divider?.textStyle)).toBe("#DADCE0");
+    expect(divider?.para?.lineSpacing).toBe(115);
+
+    const bannerBlank = applied.paragraphs[4];
+    expect(bannerBlank?.text).toBe("");
+    expect(bannerBlank?.para?.lineSpacing).toBe(115);
 
     const date = byText.get("TUESDAY, NOVEMBER 10, 2026 \u00b7 08:16");
+    expect(date?.textStyle?.weightedFontFamily).toEqual({ fontFamily: "Arial", weight: 700 });
     expect(date?.textStyle?.bold).toBe(true);
     expect(date?.textStyle?.fontSize).toEqual({ magnitude: 9, unit: "PT" });
     expect(hex(date?.textStyle)).toBe("#1A73E8");
-    expect(date?.para?.namedStyleType).toBe("NORMAL_TEXT");
+    expect(date?.para).toMatchObject({ namedStyleType: "NORMAL_TEXT", lineSpacing: 100, spaceAbove: { magnitude: 0, unit: "PT" }, spaceBelow: { magnitude: 0, unit: "PT" } });
 
-    const title = byText.get("Placeholder Title  \u{1F610}");
-    expect(title?.para?.namedStyleType).toBe("HEADING_1");
-    expect(title?.textStyle?.fontSize).toEqual({ magnitude: 20, unit: "PT" });
-    expect(title?.textStyle?.bold).toBe(false);
-    expect(hex(title?.textStyle)).toBe("#000000");
+    const titleText = "Placeholder Title  \u{1F610}";
+    const title = byText.get(titleText);
+    expect(title?.para).toEqual({ namedStyleType: "HEADING_1", lineSpacing: 100 });
+    expect(title?.textStyle).toBeUndefined();
+    const titleStart = template.indexOf(titleText) + 1;
+    const titleStyle = body.requests.find((request) => request.updateParagraphStyle?.range.startIndex === titleStart);
+    expect(titleStyle?.updateParagraphStyle?.fields).toBe("namedStyleType,lineSpacing");
+    expect(body.requests.some((request) => request.updateTextStyle?.range.startIndex === titleStart)).toBe(false);
 
     const mood = byText.get("Mood: calm, focused");
+    expect(mood?.textStyle?.weightedFontFamily.fontFamily).toBe("Arial");
     expect(mood?.textStyle?.italic).toBe(true);
     expect(mood?.textStyle?.fontSize).toEqual({ magnitude: 10, unit: "PT" });
     expect(hex(mood?.textStyle)).toBe("#5F6368");
+    expect(mood?.para?.lineSpacing).toBe(100);
 
     const info = applied.paragraphs.find((paragraph) => paragraph.text.includes("\u{1F4CD}"));
     expect(info?.text).toBe("\u{1F563} 08:16  \u00b7  \u{1F4CD} Chicago, IL  \u00b7  \u2600\ufe0f 48\u00b0F, clear");
+    expect(info?.textStyle?.weightedFontFamily).toEqual({ fontFamily: "Arial", weight: 400 });
+    expect(info?.textStyle?.bold).toBe(false);
     expect(info?.textStyle?.fontSize).toEqual({ magnitude: 9, unit: "PT" });
     expect(hex(info?.textStyle)).toBe("#3C4043");
     expect(background(info?.textStyle)).toBe("#F1F3F4");
+    expect(info?.para).not.toHaveProperty("backgroundColor");
+
+    const bodyLine = byText.get("First placeholder paragraph.");
+    expect(bodyLine?.textStyle).toMatchObject({ bold: false, italic: false, fontSize: { magnitude: 11, unit: "PT" }, weightedFontFamily: { fontFamily: "Arial", weight: 400 } });
+    expect(hex(bodyLine?.textStyle)).toBe("#000000");
+    expect(bodyLine?.para?.lineSpacing).toBe(100);
 
     const tags = byText.get("#calm #focused  \u00b7  #placeholder");
+    expect(tags?.textStyle?.weightedFontFamily.fontFamily).toBe("Arial");
     expect(tags?.textStyle?.italic).toBe(true);
     expect(tags?.textStyle?.fontSize).toEqual({ magnitude: 10, unit: "PT" });
     expect(hex(tags?.textStyle)).toBe("#5F6368");
 
-    for (const paragraph of applied.paragraphs) {
-      expect(paragraph.para?.lineSpacing).toBe(100);
-      expect(paragraph.para?.spaceAbove).toEqual({ magnitude: 0, unit: "PT" });
-      expect(paragraph.para?.spaceBelow).toEqual({ magnitude: 0, unit: "PT" });
-      if (paragraph.text !== "Placeholder Title  \u{1F610}") {
-        expect(paragraph.para?.namedStyleType).toBe("NORMAL_TEXT");
-      }
+    for (const line of ["Journal: November 2026 \u00b7 Published", "Source: journal-app"]) {
+      const paragraph = byText.get(line);
+      expect(paragraph?.textStyle?.fontSize).toEqual({ magnitude: 8, unit: "PT" });
+      expect(paragraph?.textStyle?.bold).toBe(false);
+      expect(paragraph?.textStyle?.italic).toBe(false);
+      expect(paragraph?.textStyle?.weightedFontFamily).toEqual({ fontFamily: "Arial", weight: 400 });
+      expect(hex(paragraph?.textStyle)).toBe("#9AA0A6");
+      expect(paragraph?.para?.lineSpacing).toBe(100);
     }
+
+    const normal = body.requests.find((request) => request.updateNamedStyle?.namedStyle.namedStyleType === "NORMAL_TEXT");
+    expect(normal?.updateNamedStyle?.namedStyle).toMatchObject({
+      textStyle: { bold: false, fontSize: { magnitude: 11, unit: "PT" }, weightedFontFamily: { fontFamily: "Arial", weight: 400 } },
+      paragraphStyle: { lineSpacing: 115, spaceAbove: { magnitude: 0, unit: "PT" }, spaceBelow: { magnitude: 0, unit: "PT" } },
+    });
+    const heading = body.requests.find((request) => request.updateNamedStyle?.namedStyle.namedStyleType === "HEADING_1");
+    expect(heading?.updateNamedStyle?.namedStyle).toMatchObject({
+      textStyle: { bold: false, fontSize: { magnitude: 20, unit: "PT" }, weightedFontFamily: { fontFamily: "Arial", weight: 400 } },
+      paragraphStyle: { spaceAbove: { magnitude: 20, unit: "PT" }, spaceBelow: { magnitude: 6, unit: "PT" } },
+    });
+    expect(heading?.updateNamedStyle?.fields).not.toContain("lineSpacing");
+    expect(body.requests.some((request) => request.createHeader?.type === "DEFAULT")).toBe(true);
+    expect(JSON.stringify(body.requests)).not.toContain("Imported from");
     expect(template.endsWith("Source: journal-app\n")).toBe(true);
     expect(template.trimEnd().endsWith(DIVIDER)).toBe(false);
   });
@@ -107,6 +146,12 @@ describe("entry batchUpdate builder", () => {
     expect(count?.textStyle?.weightedFontFamily.fontFamily).toBe("Lato");
     expect(count?.textStyle?.fontSize.magnitude).toBe(10);
     expect(hex(count?.textStyle)).toBe("#5F6368");
+    expect(count?.para?.lineSpacing).toBe(115);
+    const between = applied.paragraphs.filter((paragraph) => paragraph.text === DIVIDER);
+    expect(between[0]?.para).toBeUndefined();
+    expect(between[1]?.para?.lineSpacing).toBe(100);
+    expect(between[1]?.textStyle?.fontSize).toEqual({ magnitude: 11, unit: "PT" });
+    expect(hex(between[1]?.textStyle)).toBe("#DADCE0");
   });
 
   it("refuses to write a document that has no banner", () => {

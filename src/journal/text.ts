@@ -208,6 +208,8 @@ export type LineKind =
   | "kicker"
   | "month"
   | "count"
+  | "bannerDivider"
+  | "bannerBlank"
   | "divider"
   | "blank"
   | "date"
@@ -251,8 +253,8 @@ export function documentLines(entries: JournalEntry[]): MarkedLine[] {
     { kind: "kicker", text: KICKER },
     { kind: "month", text: monthLabel(entries[0].at) },
     { kind: "count", text: countLine(entries.length) },
-    { kind: "divider", text: DIVIDER },
-    { kind: "blank", text: "" },
+    { kind: "bannerDivider", text: DIVIDER },
+    { kind: "bannerBlank", text: "" },
   ];
   entries.forEach((entry, index) => {
     if (index > 0) lines.push({ kind: "divider", text: DIVIDER }, { kind: "blank", text: "" });

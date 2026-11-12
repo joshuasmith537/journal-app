@@ -179,6 +179,54 @@ describe("new month creation", () => {
   });
 });
 
+describe("live journal text", () => {
+  it("parses the legacy October status line and never writes it", () => {
+    const doc = renderDocument([entryOne]).replace(
+      "Journal: November 2026 \u00b7 Published",
+      "Imported from Journal: October 2026 \u00b7 Published",
+    );
+    const parsed = parseJournal(doc);
+    expect(parsed.skipped).toBe(0);
+    expect(parsed.entries[0].status).toBe("Published");
+    expect(renderDocument(parsed.entries)).not.toContain("Imported from");
+    expect(renderDocument(parsed.entries)).toContain("Journal: November 2026 \u00b7 Published");
+  });
+
+  it("reads a caption hyperlink without using text length as the append index", () => {
+    const plain = structureFromPlainText(renderDocument([entryOne]));
+    const last = plain.paragraphs[plain.paragraphs.length - 1];
+    const doc = readDocsBody({
+      revisionId: "rev",
+      body: {
+        content: [
+          ...plain.paragraphs.slice(0, -1).map((paragraph) => ({
+            startIndex: paragraph.startIndex,
+            endIndex: paragraph.endIndex,
+            paragraph: {
+              elements: [{ startIndex: paragraph.startIndex, endIndex: paragraph.endIndex, textRun: { content: `${paragraph.text}\n` } }],
+            },
+          })),
+          {
+            startIndex: last.startIndex,
+            endIndex: last.endIndex,
+            paragraph: {
+              elements: [
+                {
+                  startIndex: last.startIndex,
+                  endIndex: last.endIndex,
+                  textRun: { content: `${last.text}\n`, textStyle: { link: { url: "https://example.com" }, fontSize: { magnitude: 9, unit: "PT" } } },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+    const request = buildAppendRequests(doc, "rev", entryTwo).requests.filter((item) => item.insertText).at(-1);
+    expect(request?.insertText?.location.index).toBe(doc.endIndex - 1 + ("2 entries".length - "1 entry".length));
+  });
+});
+
 describe("smaller review fixes", () => {
   it("uses a referrer policy the Picker API key can see", () => {
     const html = readFileSync("index.html", "utf8");

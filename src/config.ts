@@ -15,6 +15,12 @@ export const config = {
   googleClientId: "677493523826-8f57ce9pfmibj2p8l08jg1f0mbt01bpq.apps.googleusercontent.com",
   googlePickerApiKey: "AIzaSyDQv6CHB1Iyxa2yCXFNQDQPWGj-RUih8T8",
   googleCloudProjectNumber: "677493523826",
+  /**
+   * Referrer-restricted key for the Maps JavaScript API bootstrap
+   * (`importLibrary("geocoding")`). Empty until it is filled in.
+   * This is not a Geocoding REST key.
+   */
+  GOOGLE_MAPS_API_KEY: "",
   journal: {
     personalFolderId: "1RMiZua4BHSfneXLHH3sCX963XhgCsJCh",
     years: {

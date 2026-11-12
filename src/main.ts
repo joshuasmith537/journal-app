@@ -19,6 +19,16 @@ import {
   stripDocsControls,
 } from "./journal/text";
 import { chooseWeather, lookupWeather } from "./weather";
+import {
+  DEFAULT_PLACE,
+  type GeoPermission,
+  isCustomPlace,
+  placeAfterLookup,
+  readCurrentPosition,
+  readGeoPermission,
+  reverseStreetAddress,
+  shouldRequestPosition,
+} from "./location";
 
 interface Draft {
   title: string;
@@ -120,6 +130,9 @@ let noteNode: HTMLElement | null = null;
 let saveTimer = 0;
 let weatherTimer = 0;
 let weatherGeneration = 0;
+let placeEdited = false;
+let entryLocationStarted = false;
+let promptAlreadyUsed = false;
 
 void boot();
 
@@ -213,6 +226,8 @@ async function finishPublish(entry: JournalEntry): Promise<void> {
   };
   state.queue.push(item);
   state.draft = emptyDraft();
+  placeEdited = false;
+  entryLocationStarted = false;
   await kvSet("queue", state.queue);
   await kvSet("draft", state.draft);
   if (!navigator.onLine) state.note = "Saved on this device. It will sync when you are online and signed in.";
@@ -448,8 +463,12 @@ function bindRoute(): void {
     state.draft.moodWords = value;
   });
   bind("place", (value) => {
+    placeEdited = true;
     state.draft.place = value;
   }, true);
+  document.querySelector(".write")?.addEventListener("focusin", () => {
+    beginEntryLocation();
+  });
   bind("mood-tags", (value) => {
     state.draft.moodTags = value;
   });
@@ -667,13 +686,43 @@ function draftEmpty(draft: Draft): boolean {
   return !draft.title.trim() && !draft.body.trim() && !draft.mood && !draft.moodWords.trim() && !draft.moodTags.trim() && !draft.topicTags.trim();
 }
 
+function beginEntryLocation(): void {
+  if (entryLocationStarted) return;
+  entryLocationStarted = true;
+  void locateEntryPlace();
+}
+
+async function locateEntryPlace(): Promise<void> {
+  const permission: GeoPermission = await readGeoPermission();
+  const ask = shouldRequestPosition({
+    permission,
+    key: config.GOOGLE_MAPS_API_KEY,
+    place: state.draft.place,
+    edited: placeEdited,
+    alreadyAskedWhilePrompt: promptAlreadyUsed,
+  });
+  if (!ask) return;
+  if (permission !== "granted") promptAlreadyUsed = true;
+  const position = await readCurrentPosition();
+  if (!position || placeEdited || isCustomPlace(state.draft.place)) return;
+  const address = await reverseStreetAddress(position.latitude, position.longitude, config.GOOGLE_MAPS_API_KEY);
+  const next = placeAfterLookup(state.draft.place, placeEdited, address);
+  if (next === state.draft.place) return;
+  state.draft.place = next;
+  state.draft.updatedAt = new Date().toISOString();
+  const input = document.querySelector<HTMLInputElement>("#place");
+  if (input && !placeEdited) input.value = next;
+  scheduleSave();
+  scheduleWeather();
+}
+
 function emptyDraft(): Draft {
   return {
     title: "",
     body: "",
     mood: null,
     moodWords: "",
-    place: "Chicago, IL",
+    place: DEFAULT_PLACE,
     moodTags: "",
     topicTags: "",
     weather: null,

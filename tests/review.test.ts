@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { authPrompt, pickerParent } from "../src/google/auth";
+import { config, isConfigured } from "../src/config";
+import { DRIVE_SCOPE, authPrompt, pickerParent } from "../src/google/auth";
 import { buildAppendRequests, buildCreateRequests } from "../src/journal/batch";
 import { cacheWarning, entryAlreadyInDocument, parseJournal } from "../src/journal/parse";
 import { readDocsBody, structureFromPlainText, UnreadableDocumentError } from "../src/journal/structure";
@@ -16,7 +17,6 @@ import { chooseWeather } from "../src/weather";
 import { placeCspMeta } from "../src/cspMeta";
 import { applyDoc, paragraphRangesStayInside } from "./applyDoc";
 import { entryOne, entryTwo } from "./fixtures";
-import { config } from "../src/config";
 
 const YEAR_2026 = config.journal.years["2026"].folderId;
 const PERSONAL = config.journal.personalFolderId;
@@ -232,6 +232,18 @@ describe("smaller review fixes", () => {
     const html = readFileSync("index.html", "utf8");
     expect(html).toContain('content="strict-origin-when-cross-origin"');
     expect(html).not.toContain("no-referrer");
+    const pagesReferrer = `${new URL("https://joshuasmith537.github.io/journal-app/").origin}/`;
+    const localhostReferrer = `${new URL("http://localhost:5173/journal-app/").origin}/`;
+    expect(pagesReferrer.startsWith("https://joshuasmith537.github.io/")).toBe(true);
+    expect(localhostReferrer.startsWith("http://localhost:5173/")).toBe(true);
+  });
+
+  it("ships the public Google client identifiers and drive.file only", () => {
+    expect(isConfigured()).toBe(true);
+    expect(config.googleClientId).toBe("677493523826-8f57ce9pfmibj2p8l08jg1f0mbt01bpq.apps.googleusercontent.com");
+    expect(config.googlePickerApiKey).toBe("AIzaSyDQv6CHB1Iyxa2yCXFNQDQPWGj-RUih8T8");
+    expect(config.googleCloudProjectNumber).toBe("677493523826");
+    expect(DRIVE_SCOPE).toBe("https://www.googleapis.com/auth/drive.file");
   });
 
   it("places the CSP meta before scripts and styles", () => {

@@ -34,7 +34,7 @@ Open http://localhost:5173/journal-app/ . The dev server and the GitHub Pages si
 
 ## Google Cloud setup
 
-Create one Cloud project, then fill in the three `YOUR_*` values in `src/config.ts`.
+The public client id, Picker API key, and Cloud project number are in `src/config.ts`. There is no client secret. The key allows only the Picker API from `https://joshuasmith537.github.io/*` and `http://localhost:5173/*`.
 
 1. Enable **Google Drive API**, **Google Docs API**, and **Google Picker API**.
 2. OAuth consent screen: External, app name “Personal Journal”. Add `joshuasmith537@gmail.com` as a test user. Leave the app in Testing. The only scope this app requests is non-sensitive `https://www.googleapis.com/auth/drive.file` (“See, edit, create, and delete only the specific Google Drive files you use with this app”). Do not add a Drive-wide scope.

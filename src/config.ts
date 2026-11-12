@@ -1,16 +1,20 @@
 /**
- * Google Cloud placeholders. Replace the three YOUR_* values after creating
- * the OAuth client, Picker API key, and noting the project number.
- * Setup is documented in the README.
+ * Public client-side Google identifiers. There is no client secret.
+ * The Picker API key allows only the Picker API, and only the referrers
+ * https://joshuasmith537.github.io/* and http://localhost:5173/*.
+ * The page referrer policy is strict-origin-when-cross-origin, so a Picker
+ * request from https://joshuasmith537.github.io/journal-app/ sends
+ * Referer: https://joshuasmith537.github.io/ and matches that restriction.
+ * The only OAuth scope is drive.file. The consent screen is in Testing.
  *
  * Folder and Doc ids point at the existing Personal Journal. They are not
  * access tokens. This app never references the Journal Index, book PDFs,
  * or Media folders.
  */
 export const config = {
-  googleClientId: "YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
-  googlePickerApiKey: "YOUR_GOOGLE_PICKER_API_KEY",
-  googleCloudProjectNumber: "YOUR_CLOUD_PROJECT_NUMBER",
+  googleClientId: "677493523826-8f57ce9pfmibj2p8l08jg1f0mbt01bpq.apps.googleusercontent.com",
+  googlePickerApiKey: "AIzaSyDQv6CHB1Iyxa2yCXFNQDQPWGj-RUih8T8",
+  googleCloudProjectNumber: "677493523826",
   journal: {
     personalFolderId: "1RMiZua4BHSfneXLHH3sCX963XhgCsJCh",
     years: {

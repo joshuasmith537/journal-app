@@ -4,10 +4,11 @@ import { config } from "../src/config";
 import {
   DEFAULT_PLACE,
   GEO_OPTIONS,
+  LOCATE_HINT,
   type GeocodeResult,
   formatStreetAddress,
-  placeAfterLookup,
-  shouldRequestPosition,
+  locateAction,
+  placeAfterLocate,
   trimFormattedAddress,
 } from "../src/location";
 
@@ -22,14 +23,6 @@ const palatine: GeocodeResult = {
     { long_name: "60067", short_name: "60067", types: ["postal_code"] },
     { long_name: "United States", short_name: "US", types: ["country", "political"] },
   ],
-};
-
-const base = {
-  permission: "granted" as const,
-  key: "maps-key",
-  place: DEFAULT_PLACE,
-  edited: false,
-  alreadyAskedWhilePrompt: false,
 };
 
 describe("street address", () => {
@@ -65,33 +58,34 @@ describe("street address", () => {
   });
 });
 
-describe("location fallbacks", () => {
-  it("reads a granted position every time and lets a prompt happen once", () => {
-    expect(shouldRequestPosition({ ...base, permission: "granted" })).toBe(true);
-    expect(shouldRequestPosition({ ...base, permission: "granted", alreadyAskedWhilePrompt: true })).toBe(true);
-    expect(shouldRequestPosition({ ...base, permission: "prompt" })).toBe(true);
-    expect(shouldRequestPosition({ ...base, permission: "unknown" })).toBe(true);
-    expect(shouldRequestPosition({ ...base, permission: "prompt", alreadyAskedWhilePrompt: true })).toBe(false);
+describe("location button", () => {
+  it("asks on a tap when Chrome can prompt or already allowed it", () => {
+    expect(locateAction("granted", "maps-key")).toBe("position");
+    expect(locateAction("prompt", "maps-key")).toBe("position");
+    expect(locateAction("unknown", "maps-key")).toBe("position");
   });
 
-  it("stays on Chicago when permission is denied, the key is empty, the lookup times out, or nothing matches", () => {
-    expect(shouldRequestPosition({ ...base, permission: "denied" })).toBe(false);
-    expect(shouldRequestPosition({ ...base, key: "  " })).toBe(false);
-    expect(placeAfterLookup(DEFAULT_PLACE, false, null)).toBe(DEFAULT_PLACE);
-    expect(placeAfterLookup(DEFAULT_PLACE, false, "  ")).toBe(DEFAULT_PLACE);
+  it("fails without asking when permission is denied or the key is empty", () => {
+    expect(locateAction("denied", "maps-key")).toBe("fail");
+    expect(locateAction("granted", "  ")).toBe("fail");
+    expect(locateAction("prompt", "")).toBe("fail");
+  });
+
+  it("leaves the field unchanged and sets a hint when the lookup misses", () => {
+    expect(placeAfterLocate(DEFAULT_PLACE, null)).toEqual({ place: DEFAULT_PLACE, hint: LOCATE_HINT });
+    expect(placeAfterLocate("Oak Park, IL", "  ")).toEqual({ place: "Oak Park, IL", hint: LOCATE_HINT });
     expect(formatStreetAddress([])).toBeNull();
   });
 
-  it("does not overwrite a place that was typed", () => {
-    expect(shouldRequestPosition({ ...base, edited: true })).toBe(false);
-    expect(shouldRequestPosition({ ...base, place: "Oak Park, IL" })).toBe(false);
-    expect(placeAfterLookup("Oak Park, IL", false, "123 N Main St, Palatine, IL")).toBe("Oak Park, IL");
-    expect(placeAfterLookup(DEFAULT_PLACE, true, "123 N Main St, Palatine, IL")).toBe(DEFAULT_PLACE);
-    expect(placeAfterLookup("", true, "123 N Main St, Palatine, IL")).toBe("");
-  });
-
-  it("fills the default place when a street address comes back", () => {
-    expect(placeAfterLookup(DEFAULT_PLACE, false, "123 N Main St, Palatine, IL")).toBe("123 N Main St, Palatine, IL");
+  it("replaces whatever is in the field when a street address comes back", () => {
+    expect(placeAfterLocate(DEFAULT_PLACE, "123 N Main St, Palatine, IL")).toEqual({
+      place: "123 N Main St, Palatine, IL",
+      hint: "",
+    });
+    expect(placeAfterLocate("Oak Park, IL", "123 N Main St, Palatine, IL")).toEqual({
+      place: "123 N Main St, Palatine, IL",
+      hint: "",
+    });
   });
 
   it("asks the browser for a fresh high-accuracy fix", () => {
@@ -110,6 +104,10 @@ describe("location setup", () => {
     expect(app).not.toContain("geolocation.getCurrentPosition");
     const html = readFileSync("index.html", "utf8");
     expect(html).toContain('http-equiv="Permissions-Policy" content="geolocation=(self)"');
+    const main = readFileSync("src/main.ts", "utf8");
+    expect(main).toContain('id: "locate"');
+    expect(main).not.toContain("beginEntryLocation");
+    expect(main).not.toContain("focusin");
     const csp = readFileSync("vite.config.ts", "utf8");
     expect(csp).toContain("https://maps.googleapis.com https://maps.gstatic.com");
     expect(csp).toContain("https://oauth2.googleapis.com https://maps.googleapis.com");

@@ -24,34 +24,22 @@ export interface GeocodeResult {
   geometry?: { location_type?: string };
 }
 
-export function isCustomPlace(place: string): boolean {
-  const trimmed = place.trim();
-  return trimmed !== "" && trimmed !== DEFAULT_PLACE;
-}
+export const LOCATE_HINT = "Couldn't use this location.";
 
 /**
- * Granted: read the position with no prompt.
- * Prompt or an unavailable Permissions API: one native browser prompt.
- * Denied, an empty Maps key, or a place the user already set: do nothing.
+ * A tap reads the position. Granted is silent. Prompt lets Chrome ask once.
+ * Denied, or an empty Maps key, fails without asking.
  */
-export function shouldRequestPosition(input: {
-  permission: GeoPermission;
-  key: string;
-  place: string;
-  edited: boolean;
-  alreadyAskedWhilePrompt: boolean;
-}): boolean {
-  if (input.edited || isCustomPlace(input.place) || !input.key.trim()) return false;
-  if (input.permission === "denied") return false;
-  if (input.permission === "granted") return true;
-  return !input.alreadyAskedWhilePrompt;
+export function locateAction(permission: GeoPermission, key: string): "position" | "fail" {
+  if (!key.trim() || permission === "denied") return "fail";
+  return "position";
 }
 
-/** Keeps a typed place. Otherwise uses the street address, or Chicago when there isn't one. */
-export function placeAfterLookup(current: string, edited: boolean, address: string | null): string {
-  if (edited || isCustomPlace(current)) return current;
+/** A found address replaces the field. A miss leaves the current text and sets a hint. */
+export function placeAfterLocate(current: string, address: string | null): { place: string; hint: string } {
   const next = address?.trim();
-  return next || DEFAULT_PLACE;
+  if (!next) return { place: current, hint: LOCATE_HINT };
+  return { place: next, hint: "" };
 }
 
 export function formatStreetAddress(results: GeocodeResult[]): string | null {

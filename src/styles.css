@@ -107,6 +107,36 @@ h1 { margin: 0; font-size: 2rem; line-height: 1; }
 
 .field { display: grid; gap: 0.35rem; font-size: 0.85rem; color: var(--muted); }
 
+.place-line { display: flex; align-items: center; gap: 0.4rem; }
+.place-line input { flex: 1; min-width: 0; width: auto; }
+
+.locate {
+  flex: none;
+  width: 2.6rem;
+  height: 2.6rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 1.15rem;
+  position: relative;
+}
+
+.locate.busy { color: transparent; }
+
+.locate.busy::after {
+  content: "";
+  position: absolute;
+  inset: 0.55rem;
+  border: 2px solid var(--line);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: locate-spin 0.7s linear infinite;
+}
+
+@keyframes locate-spin { to { transform: rotate(360deg); } }
+
+.place-hint:empty { display: none; }
+
 input, textarea {
   width: 100%;
   border: 0;

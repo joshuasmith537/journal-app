@@ -1,5 +1,25 @@
 import type { DocRequest, ParagraphStyle, TextStyle } from "../src/journal/batch";
 
+/** Paragraph styles must stop before the segment's final newline. */
+export function paragraphRangesStayInside(requests: DocRequest[], initial = "\n"): void {
+  let text = initial;
+  for (const request of requests) {
+    if (request.insertText) {
+      const at = request.insertText.location.index - 1;
+      text = text.slice(0, at) + request.insertText.text + text.slice(at);
+    } else if (request.deleteContentRange) {
+      const start = request.deleteContentRange.range.startIndex - 1;
+      const end = request.deleteContentRange.range.endIndex - 1;
+      text = text.slice(0, start) + text.slice(end);
+    } else if (request.updateParagraphStyle) {
+      const segmentEnd = text.length + 1;
+      if (request.updateParagraphStyle.range.endIndex >= segmentEnd) {
+        throw new Error(`paragraph style includes the final newline (${request.updateParagraphStyle.range.endIndex} >= ${segmentEnd})`);
+      }
+    }
+  }
+}
+
 export interface AppliedParagraph {
   text: string;
   textStyle?: TextStyle;

@@ -1,3 +1,4 @@
+import { assertConsistent, isEmptyDocument, type JournalDocument } from "./structure";
 import {
   DIVIDER,
   type JournalEntry,
@@ -163,17 +164,21 @@ function layouts(insertText: string, insertIndex: number, lines: MarkedLine[], s
   return out;
 }
 
-function styleRequests(items: Layout[]): DocRequest[] {
+function styleRequests(items: Layout[], segmentEnd: number): DocRequest[] {
   const requests: DocRequest[] = [];
   for (const item of items) {
     const styles = stylesFor(item.kind);
-    requests.push({
-      updateParagraphStyle: {
-        range: { startIndex: item.textStart, endIndex: item.paraEnd },
-        paragraphStyle: styles.paragraph,
-        fields: PARA_FIELDS,
-      },
-    });
+    // A range that includes the segment's final newline is rejected by the Docs API.
+    const paraEnd = Math.min(item.paraEnd, segmentEnd - 1);
+    if (paraEnd > item.textStart) {
+      requests.push({
+        updateParagraphStyle: {
+          range: { startIndex: item.textStart, endIndex: paraEnd },
+          paragraphStyle: styles.paragraph,
+          fields: PARA_FIELDS,
+        },
+      });
+    }
     if (item.textEnd > item.textStart && styles.text) {
       requests.push({
         updateTextStyle: {
@@ -187,18 +192,12 @@ function styleRequests(items: Layout[]): DocRequest[] {
   return requests;
 }
 
-export function findCount(documentText: string): { start: number; text: string; count: number } {
-  const body = documentText.endsWith("\n") ? documentText.slice(0, -1) : documentText;
-  const lines = body.split("\n");
-  const line = lines[2] ?? "";
-  const match = line.match(/^(\d+) (?:entry|entries) {2}\u00b7 {2}Journal: Personal$/);
+export function findCount(doc: JournalDocument): { start: number; text: string; count: number } {
+  const paragraph = doc.paragraphs[2];
+  if (!paragraph || paragraph.text !== paragraph.plain) throw new Error("banner count line not found");
+  const match = paragraph.plain.match(/^(\d+) (?:entry|entries) {2}\u00b7 {2}Journal: Personal$/);
   if (!match) throw new Error("banner count line not found");
-  const offset = lines[0].length + 1 + lines[1].length + 1;
-  return { start: offset + 1, text: line, count: Number(match[1]) };
-}
-
-export function isEmptyDoc(documentText: string): boolean {
-  return documentText === "" || documentText === "\n";
+  return { start: paragraph.startIndex, text: paragraph.plain, count: Number(match[1]) };
 }
 
 function withLock(requests: DocRequest[], revisionId: string): BatchUpdateBody {
@@ -208,21 +207,67 @@ function withLock(requests: DocRequest[], revisionId: string): BatchUpdateBody {
 export function buildCreateRequests(entry: JournalEntry, revisionId: string): BatchUpdateBody {
   const lines = documentLines([entry]);
   const insertText = lines.map((line) => line.text).join("\n");
+  const segmentEnd = insertText.length + 2;
   return withLock(
-    [{ insertText: { location: { index: 1 }, text: insertText } }, ...styleRequests(layouts(insertText, 1, lines, false))],
+    [
+      { insertText: { location: { index: 1 }, text: insertText } },
+      ...styleRequests(layouts(insertText, 1, lines, false), segmentEnd),
+    ],
     revisionId,
   );
 }
 
-export function buildAppendRequests(documentText: string, revisionId: string, entry: JournalEntry): BatchUpdateBody {
-  const found = findCount(documentText);
+interface AppendPlan {
+  index: number;
+  insertText: string;
+  lines: MarkedLine[];
+  skipLeadingNewline: boolean;
+}
+
+/**
+ * Insert after the last non-empty paragraph, using the body's structural end.
+ * A trailing empty paragraph must not become an extra blank line before the divider.
+ * A banner with zero entries keeps the blank line under its divider.
+ */
+export function planAppend(doc: JournalDocument, count: number, entry: JournalEntry): AppendPlan {
+  const lastNonEmpty = [...doc.paragraphs].reverse().find((paragraph) => paragraph.text !== "");
+  if (!lastNonEmpty) throw new Error("Document has no content to append after");
+  const atEnd = lastNonEmpty.endIndex === doc.endIndex;
+  const entryOnly = entryLines(entry);
+  const joined = entryOnly.map((line) => line.text).join("\n");
+  if (count >= 1) {
+    const lines: MarkedLine[] = [{ kind: "divider", text: DIVIDER }, { kind: "blank", text: "" }, ...entryOnly];
+    return {
+      index: atEnd ? doc.endIndex - 1 : lastNonEmpty.endIndex,
+      insertText: `${atEnd ? "\n" : ""}${DIVIDER}\n\n${joined}`,
+      lines,
+      skipLeadingNewline: atEnd,
+    };
+  }
+  if (atEnd) {
+    return {
+      index: doc.endIndex - 1,
+      insertText: `\n\n${joined}`,
+      lines: [{ kind: "blank", text: "" }, ...entryOnly],
+      skipLeadingNewline: true,
+    };
+  }
+  return {
+    index: lastNonEmpty.endIndex,
+    insertText: `\n${joined}`,
+    lines: entryOnly,
+    skipLeadingNewline: true,
+  };
+}
+
+export function buildAppendRequests(doc: JournalDocument, revisionId: string, entry: JournalEntry): BatchUpdateBody {
+  assertConsistent(doc);
+  const found = findCount(doc);
   const next = countLine(found.count + 1);
   const delta = next.length - found.text.length;
-  const entryOnly = entryLines(entry);
-  const appended: MarkedLine[] =
-    found.count >= 1 ? [{ kind: "divider", text: DIVIDER }, { kind: "blank", text: "" }, ...entryOnly] : entryOnly;
-  const insertText = `${found.count >= 1 ? "\n" : ""}${appended.map((line) => line.text).join("\n")}`;
-  const insertAt = documentText.length + delta;
+  const plan = planAppend(doc, found.count, entry);
+  const insertAt = plan.index + delta;
+  const segmentEnd = doc.endIndex + delta + plan.insertText.length;
   const countLayout: Layout = {
     kind: "count",
     textStart: found.start,
@@ -233,16 +278,16 @@ export function buildAppendRequests(documentText: string, revisionId: string, en
     [
       { deleteContentRange: { range: { startIndex: found.start, endIndex: found.start + found.text.length } } },
       { insertText: { location: { index: found.start }, text: next } },
-      ...styleRequests([countLayout]),
-      { insertText: { location: { index: insertAt }, text: insertText } },
-      ...styleRequests(layouts(insertText, insertAt, appended, found.count >= 1)),
+      ...styleRequests([countLayout], doc.endIndex + delta),
+      { insertText: { location: { index: insertAt }, text: plan.insertText } },
+      ...styleRequests(layouts(plan.insertText, insertAt, plan.lines, plan.skipLeadingNewline), segmentEnd),
     ],
     revisionId,
   );
 }
 
 /** Empty docs get a banner plus the entry. Anything else is an append. A doc with no banner is refused. */
-export function buildWriteRequests(documentText: string, revisionId: string, entry: JournalEntry): BatchUpdateBody {
-  if (isEmptyDoc(documentText)) return buildCreateRequests(entry, revisionId);
-  return buildAppendRequests(documentText, revisionId, entry);
+export function buildWriteRequests(doc: JournalDocument, revisionId: string, entry: JournalEntry): BatchUpdateBody {
+  if (isEmptyDocument(doc)) return buildCreateRequests(entry, revisionId);
+  return buildAppendRequests(doc, revisionId, entry);
 }

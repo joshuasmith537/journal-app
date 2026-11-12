@@ -2,6 +2,11 @@ import { formatWeather } from "./journal/text";
 
 const CHICAGO = { latitude: 41.8781, longitude: -87.6298 };
 
+export function chooseWeather(online: boolean, fresh: string | null, cached: string | null): string | null {
+  if (online && fresh) return fresh;
+  return cached;
+}
+
 export async function lookupWeather(place: string): Promise<string | null> {
   try {
     const coords =

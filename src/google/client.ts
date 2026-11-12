@@ -1,11 +1,10 @@
 import type { BatchUpdateBody } from "../journal/batch";
-import { documentBodyToText } from "../journal/parse";
+import { readDocsBody, type JournalDocument } from "../journal/structure";
 import { filterDriveFiles, isAccountabilityName } from "../journal/accountability";
 import {
   DOC_MIME,
   FOLDER_MIME,
   httpError,
-  type DocSnapshot,
   type DriveFile,
   type DriveIO,
 } from "../journal/sync";
@@ -46,11 +45,11 @@ export class GoogleDrive implements DriveIO {
     return this.create(name, DOC_MIME, parentId);
   }
 
-  async getDocument(id: string): Promise<DocSnapshot> {
+  async getDocument(id: string): Promise<JournalDocument> {
     const data = (await this.json(
       await this.request(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(id)}`),
-    )) as Parameters<typeof documentBodyToText>[0] & { revisionId: string };
-    return { text: documentBodyToText(data), revisionId: data.revisionId };
+    )) as Parameters<typeof readDocsBody>[0];
+    return readDocsBody(data);
   }
 
   async batchUpdate(id: string, body: BatchUpdateBody): Promise<void> {

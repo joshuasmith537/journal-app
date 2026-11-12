@@ -168,7 +168,7 @@ input:focus, textarea:focus, button:focus-visible {
   padding: 0.9rem;
 }
 
-.banner p { margin: 0; }
+.banner p { margin: 0; white-space: pre-wrap; }
 
 .row { display: flex; gap: 0.5rem; }
 

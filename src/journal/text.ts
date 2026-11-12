@@ -200,7 +200,7 @@ export function formatHashtags(moodTags: string[], topicTags: string[]): string 
   const topic = topicTags.map(normalizeTag).filter(Boolean).join(" ");
   if (mood && topic) return `${mood}${WIDE}${topic}`;
   if (mood) return mood;
-  if (topic) return `${WIDE}${topic}`;
+  if (topic) return topic;
   return null;
 }
 
@@ -228,7 +228,7 @@ export function entryLines(entry: JournalEntry): MarkedLine[] {
   const lines: MarkedLine[] = [
     { kind: "date", text: formatDateLine(entry.at) },
     { kind: "title", text: `${entry.title}  ${entry.mood}` },
-    { kind: "mood", text: `Mood: ${entry.moodWords}` },
+    ...(entry.moodWords.trim() ? [{ kind: "mood" as const, text: `Mood: ${entry.moodWords.trim()}` }] : []),
     { kind: "info", text: formatInfoLine(entry.at, entry.place, entry.weather) },
     { kind: "blank", text: "" },
   ];
@@ -263,6 +263,11 @@ export function documentLines(entries: JournalEntry[]): MarkedLine[] {
 
 export function renderDocument(entries: JournalEntry[]): string {
   return `${documentLines(entries).map((line) => line.text).join("\n")}\n`;
+}
+
+/** Banner only, including the blank line after the divider. Count may be 0. */
+export function renderBanner(at: Date, count: number): string {
+  return `${[KICKER, monthLabel(at), countLine(count), DIVIDER, ""].join("\n")}\n`;
 }
 
 export function entryIdentity(at: Date, title: string): string {

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { placeCspMeta } from "./src/cspMeta";
 import { defineConfig, type Plugin } from "vitest/config";
 
 const CSP = [
@@ -22,9 +23,11 @@ function productionExtras(): Plugin {
   return {
     name: "journal-production-extras",
     apply: "build",
-    transformIndexHtml(html) {
-      const meta = `<meta http-equiv="Content-Security-Policy" content="${CSP}" />`;
-      return html.replace("</head>", `    ${meta}\n  </head>`);
+    transformIndexHtml: {
+      order: "post",
+      handler(html) {
+        return placeCspMeta(html, CSP);
+      },
     },
     closeBundle() {
       const dist = path.resolve("dist");

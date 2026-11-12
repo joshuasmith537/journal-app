@@ -1,5 +1,5 @@
 import { config } from "../config";
-import { filterDriveFiles } from "../journal/accountability";
+import { filterDriveFiles, isAccountabilityName } from "../journal/accountability";
 import { DOC_MIME, FOLDER_MIME } from "../journal/sync";
 
 export const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
@@ -69,6 +69,7 @@ export function initAuth(): void {
       }
       const expiresIn = response.expires_in ?? 3600;
       token = { value: response.access_token, expiresAt: Date.now() + expiresIn * 1000 - 60_000 };
+      if (typeof localStorage !== "undefined") localStorage.setItem(GRANTED_KEY, "1");
       emit(token.value);
     },
     error_callback: () => {
@@ -77,12 +78,25 @@ export function initAuth(): void {
   });
 }
 
-export function requestToken(): void {
-  if (!client) throw new Error("Google sign-in is not loaded");
-  client.requestAccessToken({ prompt: currentToken() ? "" : "consent" });
+const GRANTED_KEY = "journal-drive-granted";
+
+/** Consent on the first grant only. Later sessions reuse the stored grant silently. */
+export function authPrompt(previouslyGranted: boolean): "" | "consent" {
+  return previouslyGranted ? "" : "consent";
 }
 
-export function openJournalPicker(accessToken: string): Promise<PickedFile[]> {
+export function requestToken(): void {
+  if (!client) throw new Error("Google sign-in is not loaded");
+  const granted = typeof localStorage !== "undefined" && localStorage.getItem(GRANTED_KEY) === "1";
+  client.requestAccessToken({ prompt: authPrompt(granted) });
+}
+
+export function pickerParent(id: string | undefined, name: string | undefined): string | undefined {
+  if (!id || (name && isAccountabilityName(name))) return undefined;
+  return id;
+}
+
+export function openJournalPicker(accessToken: string, parent?: { id: string; name: string }): Promise<PickedFile[]> {
   return new Promise((resolve, reject) => {
     const google = window.google;
     if (!google?.picker) {
@@ -95,11 +109,14 @@ export function openJournalPicker(accessToken: string): Promise<PickedFile[]> {
       settled = true;
       resolve(filterDriveFiles(files));
     };
-    const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+    let view = new google.picker.DocsView(google.picker.ViewId.DOCS)
       .setIncludeFolders(true)
       .setSelectFolderEnabled(true)
-      .setMimeTypes(`${FOLDER_MIME},${DOC_MIME}`)
-      .setParent(config.journal.personalFolderId);
+      .setMimeTypes(`${FOLDER_MIME},${DOC_MIME}`);
+    const parentId = parent
+      ? pickerParent(parent.id, parent.name)
+      : pickerParent(config.journal.personalFolderId, "Personal");
+    if (parentId) view = view.setParent(parentId);
     const picker = new google.picker.PickerBuilder()
       .enableFeature(google.picker.Feature.MULTISELECT_ENABLED)
       .setAppId(config.googleCloudProjectNumber)

@@ -11,6 +11,7 @@ import {
   publishEntry,
   writeWithRevisionLock,
 } from "../src/journal/sync";
+import { structureFromPlainText } from "../src/journal/structure";
 import { docTitle, renderDocument } from "../src/journal/text";
 import { applyDoc } from "./applyDoc";
 import { entryOne, entryTwo } from "./fixtures";
@@ -30,7 +31,7 @@ describe("revision lock", () => {
     const seen: string[] = [];
     const text = renderDocument([entryOne]);
     await writeWithRevisionLock(
-      async () => ({ text, revisionId: `rev-${revision}` }),
+      async () => structureFromPlainText(text, `rev-${revision}`),
       async (body) => {
         writes += 1;
         seen.push(body.writeControl.requiredRevisionId);
@@ -39,7 +40,7 @@ describe("revision lock", () => {
           throw httpError(400, "The required revision ID does not match the current revision");
         }
       },
-      (current, revisionId) => buildWriteRequests(current, revisionId, entryTwo),
+      (doc, revisionId) => buildWriteRequests(doc, revisionId, entryTwo),
     );
     expect(seen).toEqual(["rev-1", "rev-2"]);
     expect(writes).toBe(2);
@@ -51,12 +52,12 @@ describe("revision lock", () => {
       writeWithRevisionLock(
         async () => {
           reads += 1;
-          return { text: renderDocument([entryOne]), revisionId: "rev-1" };
+          return structureFromPlainText(renderDocument([entryOne]), "rev-1");
         },
         async () => {
           throw httpError(400, "invalid request");
         },
-        (text, revisionId) => buildWriteRequests(text, revisionId, entryTwo),
+        (doc, revisionId) => buildWriteRequests(doc, revisionId, entryTwo),
       ),
     ).rejects.toThrow(/invalid request/);
     expect(reads).toBe(1);
@@ -116,7 +117,16 @@ describe("month doc resolution", () => {
     });
     const december = new Date("2026-12-15T18:00:00.000Z");
     const pending = await ensureMonthDoc(drive, december);
-    expect(pending).toEqual({ ok: false, code: "confirm-create", label: docTitle(december) });
+    expect(pending).toMatchObject({
+      ok: false,
+      code: "pick-then-create",
+      parentId: YEAR_2026,
+      parentName: "2026",
+    });
+    if (pending.ok || pending.code !== "pick-then-create") throw new Error("expected a create plan");
+    expect(pending.summary).toContain("Folder “12 - December” inside 2026");
+    expect(pending.summary).toContain(`Doc “${docTitle(december)}” inside 12 - December`);
+    expect(pending.summary).not.toContain("Folder “2026”");
     expect(created).toEqual([]);
     expect(gets).not.toContain("blocked-folder");
     expect(gets).not.toContain("blocked-doc");
@@ -222,7 +232,7 @@ function fake(options: {
       return created;
     },
     async getDocument() {
-      return { text, revisionId: revision };
+      return structureFromPlainText(text, revision);
     },
     async batchUpdate(_id, body) {
       options.onWrite?.(body);

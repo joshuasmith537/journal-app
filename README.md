@@ -48,7 +48,7 @@ Create one Cloud project, then fill in the three `YOUR_*` values in `src/config.
    If the picker reports that the key cannot call Drive, add the Drive API to that key’s API restriction as well. The OAuth token still limits the app to files you pick. Copy the key into `googlePickerApiKey`.
 5. Copy the Cloud project **number** (not the project id) into `googleCloudProjectNumber`. The picker needs it so a file you select is actually granted to this app.
 
-After the keys are in place, sign in and choose the Personal folder, each year and month folder you want the app to create files in, and each existing Personal Journal doc. October 2026 and November 2026 are already listed in `src/config.ts`. If one of those docs is not granted, the app asks you to pick it. It will not create a second copy.
+After the keys are in place, sign in and choose the Personal folder, each year and month folder you want the app to create files in, and each existing Personal Journal doc. October 2026 and November 2026 are already listed in `src/config.ts`. If one of those docs is not granted, the app asks you to pick it. It will not create a second copy. For a later month, the app opens the file picker in the year folder (or Personal, if that year folder is not shared yet) before it creates anything, and the confirm step lists the exact folder and doc names.
 
 ## GitHub Pages
 

@@ -1,6 +1,8 @@
 import { config } from "../config";
 import { filterDriveFiles, isAccountabilityName } from "./accountability";
 import { buildWriteRequests, type BatchUpdateBody } from "./batch";
+import { entryAlreadyInDocument } from "./parse";
+import { type JournalDocument } from "./structure";
 import {
   type JournalEntry,
   chicagoParts,
@@ -18,24 +20,25 @@ export interface DriveFile {
   mimeType: string;
 }
 
-export interface DocSnapshot {
-  text: string;
-  revisionId: string;
-}
-
 export interface DriveIO {
   getFile(id: string): Promise<DriveFile | null>;
   listChildren(parentId: string): Promise<DriveFile[]>;
   createFolder(name: string, parentId: string): Promise<DriveFile>;
   createDoc(name: string, parentId: string): Promise<DriveFile>;
-  getDocument(id: string): Promise<DocSnapshot>;
+  getDocument(id: string): Promise<JournalDocument>;
   batchUpdate(id: string, body: BatchUpdateBody): Promise<void>;
 }
 
 export type EnsureResult =
   | { ok: true; docId: string }
   | { ok: false; code: "grant"; target: "personal" | "year" | "month" | "doc"; id: string; label: string }
-  | { ok: false; code: "confirm-create"; label: string };
+  | {
+      ok: false;
+      code: "pick-then-create";
+      parentId: string;
+      parentName: string;
+      summary: string;
+    };
 
 export interface EnsureOptions {
   allowCreate?: boolean;
@@ -55,15 +58,16 @@ export function httpError(status: number, message: string): Error {
 }
 
 export async function writeWithRevisionLock(
-  read: () => Promise<DocSnapshot>,
+  read: () => Promise<JournalDocument>,
   write: (body: BatchUpdateBody) => Promise<void>,
-  build: (text: string, revisionId: string) => BatchUpdateBody,
+  build: (doc: JournalDocument, revisionId: string) => BatchUpdateBody,
   attempts = 3,
 ): Promise<void> {
   let last: unknown;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const doc = await read();
-    const body = build(doc.text, doc.revisionId);
+    const body = build(doc, doc.revisionId);
+    if (body.requests.length === 0) return;
     if (body.writeControl.requiredRevisionId !== doc.revisionId) {
       throw new Error("Write is missing the document revision lock");
     }
@@ -84,7 +88,10 @@ export async function publishEntry(drive: DriveIO, entry: JournalEntry, options:
   await writeWithRevisionLock(
     () => drive.getDocument(ensured.docId),
     (body) => drive.batchUpdate(ensured.docId, body),
-    (text, revisionId) => buildWriteRequests(text, revisionId, entry),
+    (doc, revisionId) =>
+      entryAlreadyInDocument(doc.text, entry)
+        ? { requests: [], writeControl: { requiredRevisionId: revisionId } }
+        : buildWriteRequests(doc, revisionId, entry),
   );
   return ensured;
 }
@@ -108,35 +115,65 @@ export async function ensureMonthDoc(drive: DriveIO, at: Date, options: EnsureOp
   const pickedDoc = await matchPicked(drive, picked, title, DOC_MIME);
   if (pickedDoc) return { ok: true, docId: pickedDoc.id };
 
-  const year = await resolveFolder(drive, {
-    knownId: knownYear?.folderId,
-    name: yearFolderName(at),
-    parentId: config.journal.personalFolderId,
-    parentGrant: grant("personal", config.journal.personalFolderId, "Personal"),
-    knownGrant: knownYear ? grant("year", knownYear.folderId, yearFolderName(at)) : null,
-    picked,
-    allowCreate: options.allowCreate ?? false,
-    confirmLabel: title,
-  });
-  if ("result" in year) return year.result;
+  const yearName = yearFolderName(at);
+  const monthName = monthFolderName(at);
+  if (isAccountabilityName(yearName) || isAccountabilityName(monthName) || isAccountabilityName(title)) {
+    throw new Error("Refusing to create a blocked file");
+  }
+  const steps: string[] = [];
+  let yearId: string | undefined;
+  if (knownYear) {
+    const year = await safeGet(drive, knownYear.folderId);
+    if (!year) return grant("year", knownYear.folderId, yearName);
+    if (year.mimeType !== FOLDER_MIME) throw new Error("The journal target is not a folder");
+    yearId = year.id;
+  } else {
+    const personal = await safeGet(drive, config.journal.personalFolderId);
+    if (!personal) return grant("personal", config.journal.personalFolderId, "Personal");
+    const children = filterDriveFiles(await drive.listChildren(personal.id));
+    const found =
+      children.find((file) => file.name === yearName && file.mimeType === FOLDER_MIME) ??
+      (await matchPicked(drive, picked, yearName, FOLDER_MIME));
+    if (found) yearId = found.id;
+    else steps.push(`Folder “${yearName}” inside Personal`);
+  }
 
-  const month = await resolveFolder(drive, {
-    knownId: undefined,
-    name: monthFolderName(at),
-    parentId: year.id,
-    parentGrant: grant("year", year.id, yearFolderName(at)),
-    knownGrant: null,
-    picked,
-    allowCreate: options.allowCreate ?? false,
-    confirmLabel: title,
-  });
-  if ("result" in month) return month.result;
+  let monthId: string | undefined;
+  if (yearId) {
+    const children = filterDriveFiles(await drive.listChildren(yearId));
+    const found =
+      children.find((file) => file.name === monthName && file.mimeType === FOLDER_MIME) ??
+      (await matchPicked(drive, picked, monthName, FOLDER_MIME));
+    if (found) monthId = found.id;
+  }
+  if (!monthId) steps.push(`Folder “${monthName}” inside ${yearName}`);
+  if (monthId) {
+    const children = filterDriveFiles(await drive.listChildren(monthId));
+    const existing = children.find((file) => file.name === title && file.mimeType === DOC_MIME);
+    if (existing) return { ok: true, docId: existing.id };
+  }
+  steps.push(`Doc “${title}” inside ${monthName}`);
+  if (!options.allowCreate) {
+    return {
+      ok: false,
+      code: "pick-then-create",
+      parentId: yearId ?? config.journal.personalFolderId,
+      parentName: yearId ? yearName : "Personal",
+      summary: steps.join("\n"),
+    };
+  }
 
-  const children = filterDriveFiles(await drive.listChildren(month.id));
-  const existing = children.find((file) => file.name === title && file.mimeType === DOC_MIME);
-  if (existing) return { ok: true, docId: existing.id };
-  if (!options.allowCreate) return { ok: false, code: "confirm-create", label: title };
-  const created = await drive.createDoc(title, month.id);
+  let monthParent = yearId;
+  if (!monthParent) {
+    const created = await drive.createFolder(yearName, config.journal.personalFolderId);
+    monthParent = created.id;
+  }
+  let docParent = monthId;
+  if (!docParent) {
+    const created = await drive.createFolder(monthName, monthParent);
+    docParent = created.id;
+  }
+  const created = await drive.createDoc(title, docParent);
   if (isAccountabilityName(created.name)) throw new Error("Refusing to use a blocked file");
   return { ok: true, docId: created.id };
 }
@@ -158,35 +195,3 @@ async function matchPicked(drive: DriveIO, picked: DriveFile[], name: string, mi
   return safeGet(drive, candidate.id);
 }
 
-async function resolveFolder(
-  drive: DriveIO,
-  args: {
-    knownId?: string;
-    name: string;
-    parentId: string;
-    parentGrant: EnsureResult;
-    knownGrant: EnsureResult | null;
-    picked: DriveFile[];
-    allowCreate: boolean;
-    confirmLabel: string;
-  },
-): Promise<{ id: string } | { result: EnsureResult }> {
-  if (isAccountabilityName(args.name)) return { result: { ok: false, code: "confirm-create", label: args.confirmLabel } };
-  if (args.knownId) {
-    const folder = await safeGet(drive, args.knownId);
-    if (!folder) return { result: args.knownGrant ?? args.parentGrant };
-    if (folder.mimeType !== FOLDER_MIME) throw new Error("The journal target is not a folder");
-    return { id: folder.id };
-  }
-  const picked = await matchPicked(drive, args.picked, args.name, FOLDER_MIME);
-  if (picked) return { id: picked.id };
-  const parent = await safeGet(drive, args.parentId);
-  if (!parent) return { result: args.parentGrant };
-  const children = filterDriveFiles(await drive.listChildren(args.parentId));
-  const existing = children.find((file) => file.name === args.name && file.mimeType === FOLDER_MIME);
-  if (existing) return { id: existing.id };
-  if (!args.allowCreate) return { result: { ok: false, code: "confirm-create", label: args.confirmLabel } };
-  const created = await drive.createFolder(args.name, args.parentId);
-  if (isAccountabilityName(created.name)) throw new Error("Refusing to use a blocked file");
-  return { id: created.id };
-}

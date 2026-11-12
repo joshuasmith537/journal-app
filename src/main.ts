@@ -1,9 +1,9 @@
 import "./styles.css";
 import { isConfigured, config } from "./config";
 import { kvGet, kvSet } from "./db";
-import { currentToken, initAuth, loadGoogle, openJournalPicker, requestToken, subscribeAuth } from "./google/auth";
+import { currentToken, initAuth, loadGoogle, openJournalPicker, pickerParent, requestToken, subscribeAuth } from "./google/auth";
 import { GoogleDrive } from "./google/client";
-import { parseJournal } from "./journal/parse";
+import { cacheWarning, parseJournal } from "./journal/parse";
 import { filterDriveFiles } from "./journal/accountability";
 import { DOC_MIME, type DriveFile, publishEntry } from "./journal/sync";
 import {
@@ -16,7 +16,7 @@ import {
   formatHashtags,
   formatInfoLine,
 } from "./journal/text";
-import { lookupWeather } from "./weather";
+import { chooseWeather, lookupWeather } from "./weather";
 
 interface Draft {
   title: string;
@@ -65,7 +65,10 @@ interface ViewEntry {
 }
 
 type Route = { name: "write" } | { name: "entries" } | { name: "entry"; id: string };
-type Confirm = { kind: "grant" | "create"; label: string } | null;
+type Confirm =
+  | { kind: "grant"; label: string }
+  | { kind: "create"; summary: string; parentId: string; parentName: string }
+  | null;
 
 const app = document.querySelector<HTMLElement>("#app");
 if (!app) throw new Error("Missing app root");
@@ -77,6 +80,7 @@ const state: {
   picked: DriveFile[];
   route: Route;
   note: string;
+  readNote: string;
   confirm: Confirm;
   googleReady: boolean;
 } = {
@@ -86,6 +90,7 @@ const state: {
   picked: [],
   route: parseRoute(),
   note: "",
+  readNote: "",
   confirm: null,
   googleReady: false,
 };
@@ -151,16 +156,24 @@ async function boot(): Promise<void> {
 }
 
 function onPublish(): void {
-  const entry = entryFromDraft();
-  if (!entry) {
+  if (!entryFromDraft()) {
     state.note = "Add a title and choose a mood.";
     setNote();
     return;
   }
   const needsAuth = navigator.onLine && isConfigured() && state.googleReady && !currentToken();
   if (needsAuth) requestToken();
-  chain = chain.then(() => finishPublish(entry));
+  chain = chain.then(() => publishCurrentDraft());
   if (!needsAuth) chain = chain.then(() => flush());
+}
+
+async function publishCurrentDraft(): Promise<void> {
+  const cached = state.draft.weather;
+  const fresh = navigator.onLine ? await lookupWeather(state.draft.place || "Chicago, IL") : null;
+  state.draft.weather = chooseWeather(navigator.onLine, fresh, cached);
+  const entry = entryFromDraft();
+  if (!entry) return;
+  await finishPublish(entry);
 }
 
 async function finishPublish(entry: JournalEntry): Promise<void> {
@@ -190,7 +203,7 @@ async function finishPublish(entry: JournalEntry): Promise<void> {
   void refreshWeather();
 }
 
-async function flush(options?: { allowCreate?: boolean }): Promise<void> {
+async function flush(options?: { allowCreate?: boolean; pickerOffered?: boolean }): Promise<void> {
   if (!navigator.onLine || !currentToken() || !isConfigured()) return;
   const token = currentToken();
   if (!token) return;
@@ -203,8 +216,18 @@ async function flush(options?: { allowCreate?: boolean }): Promise<void> {
         allowCreate: options?.allowCreate ?? false,
         knownFiles: state.picked,
       });
+      if (!result.ok && result.code === "pick-then-create" && !options?.pickerOffered) {
+        const parent = pickerParent(result.parentId, result.parentName);
+        const picked = await openJournalPicker(token, parent ? { id: parent, name: result.parentName } : undefined);
+        await remember(picked);
+        await flush({ allowCreate: false, pickerOffered: true });
+        return;
+      }
       if (!result.ok) {
-        state.confirm = { kind: result.code === "grant" ? "grant" : "create", label: result.label };
+        state.confirm =
+          result.code === "grant"
+            ? { kind: "grant", label: result.label }
+            : { kind: "create", summary: result.summary, parentId: result.parentId, parentName: result.parentName };
         state.note = "";
         paint();
         return;
@@ -237,16 +260,21 @@ async function refreshCache(token: string): Promise<void> {
     if (file.mimeType === DOC_MIME && file.name.startsWith("Personal Journal")) ids.add(file.id);
   }
   const next: CachedEntry[] = [];
+  let staleDocs = 0;
+  let skippedEntries = 0;
   for (const docId of ids) {
     try {
       const doc = await drive.getDocument(docId);
       const parsed = parseJournal(doc.text);
+      skippedEntries += parsed.skipped;
       parsed.entries.forEach((entry, index) => next.push(toCached(docId, index, entry)));
     } catch {
+      staleDocs += 1;
       next.push(...state.cache.filter((entry) => entry.docId === docId));
     }
   }
   state.cache = next;
+  state.readNote = cacheWarning(staleDocs, skippedEntries) ?? "";
   await kvSet("cache", state.cache);
 }
 
@@ -256,7 +284,12 @@ async function chooseFiles(): Promise<void> {
     if (state.googleReady) requestToken();
     return;
   }
-  const picked = await openJournalPicker(token);
+  const createParent = state.confirm?.kind === "create" ? state.confirm : null;
+  const parentId = createParent ? pickerParent(createParent.parentId, createParent.parentName) : undefined;
+  const picked = await openJournalPicker(
+    token,
+    parentId && createParent ? { id: parentId, name: createParent.parentName } : undefined,
+  );
   await remember(picked);
   state.confirm = null;
   chain = chain.then(() => flush());
@@ -282,7 +315,7 @@ function paint(): void {
       tab("Past", "/entries", state.route.name !== "write"),
     ),
     main,
-    h("p", { id: "note", class: "note", role: "status" }, state.note),
+    h("p", { id: "note", class: "note", role: "status" }, [state.note, state.readNote].filter(Boolean).join(" ")),
   );
   noteNode = document.querySelector("#note");
   dateNode = document.querySelector(".dateline");
@@ -318,7 +351,7 @@ function bindRoute(): void {
   });
   document.querySelector("#create-doc")?.addEventListener("click", () => {
     state.confirm = null;
-    chain = chain.then(() => flush({ allowCreate: true }));
+    chain = chain.then(() => flush({ allowCreate: true, pickerOffered: true }));
   });
   document.querySelector("#back")?.addEventListener("click", () => {
     location.hash = "#/entries";
@@ -423,7 +456,8 @@ function confirmBanner(): HTMLElement | null {
     );
   }
   return h("div", { class: "banner" },
-    h("p", null, `Create “${state.confirm.label}”? If it already exists, choose that doc instead.`),
+    h("p", null, "No matching folder or doc is shared with this app. Create exactly this?"),
+    h("p", { class: "plan" }, state.confirm.summary),
     h("div", { class: "row" },
       h("button", { type: "button", id: "create-doc" }, "Create"),
       h("button", { type: "button", id: "grant", class: "secondary" }, "Choose existing"),

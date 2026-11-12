@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildAppendRequests, buildCreateRequests, buildWriteRequests, type TextStyle } from "../src/journal/batch";
+import { structureFromPlainText } from "../src/journal/structure";
 import { DIVIDER, KICKER, renderDocument } from "../src/journal/text";
-import { applyDoc } from "./applyDoc";
+import { applyDoc, paragraphRangesStayInside } from "./applyDoc";
 import { entryOne, entryTwo } from "./fixtures";
 
 function hex(style: TextStyle | undefined): string {
@@ -24,6 +25,7 @@ describe("entry batchUpdate builder", () => {
     const body = buildCreateRequests(entryOne, "rev-1");
     expect(body.writeControl.requiredRevisionId).toBe("rev-1");
     const applied = applyDoc(body.requests);
+    paragraphRangesStayInside(body.requests);
     expect(applied.text).toBe(template);
     expect(applied.paragraphs.map((paragraph) => paragraph.text).join("\n") + "\n").toBe(template);
 
@@ -91,9 +93,10 @@ describe("entry batchUpdate builder", () => {
 
   it("appends a second entry and updates the banner count without rewriting the first", () => {
     const original = renderDocument([entryOne]);
-    const body = buildAppendRequests(original, "rev-9", entryTwo);
+    const body = buildAppendRequests(structureFromPlainText(original), "rev-9", entryTwo);
     expect(body.writeControl.requiredRevisionId).toBe("rev-9");
     const applied = applyDoc(body.requests, original);
+    paragraphRangesStayInside(body.requests, original);
     const expected = renderDocument([entryOne, entryTwo]);
     expect(applied.text).toBe(expected);
     expect(applied.text).toContain("2 entries  \u00b7  Journal: Personal");
@@ -107,6 +110,6 @@ describe("entry batchUpdate builder", () => {
   });
 
   it("refuses to write a document that has no banner", () => {
-    expect(() => buildWriteRequests("Hello\n", "rev", entryOne)).toThrow(/banner count/);
+    expect(() => buildWriteRequests(structureFromPlainText("Hello\n"), "rev", entryOne)).toThrow(/banner count/);
   });
 });
